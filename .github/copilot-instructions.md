@@ -1,0 +1,3 @@
+- Target hardware: Raspberry Pi 3 (1GB RAM, ARM architecture).
+- Language: Python 3 with asynchronous patterns (aiohttp/aiortc).
+- Constraint: Keep memory overhead low; avoid heavy ML or unnecessary background processing libraries.
