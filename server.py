@@ -13,6 +13,33 @@ from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
 
+"""
+Monpitor WebRTC Signaling Server
+
+A lightweight WebRTC signaling and media relay server optimized for Raspberry Pi 3.
+Handles peer connection negotiation via the Offer/Answer protocol and manages
+bidirectional media streams.
+
+Architecture:
+- Signaling: HTTP-based SDP negotiation endpoints (/offer, /stats, /health)
+- Peer Connections: Maintains active RTCPeerConnection objects for each client
+- Media Relay: Optional media relay for connection routing and stream management
+- Logging: Comprehensive async logging with file rotation
+
+Key Features:
+- Asynchronous I/O for efficient resource usage on constrained hardware
+- WebRTC SDP offer/answer negotiation
+- Connection state tracking and metrics
+- Graceful shutdown with connection cleanup
+- Comprehensive error handling and logging
+
+Performance Optimizations:
+- Low memory footprint for Raspberry Pi 3 (1GB RAM)
+- Non-blocking I/O with asyncio
+- Efficient media relay using aiortc MediaRelay
+- Rotating file logs to prevent disk fill
+"""
+
 ROOT = os.path.dirname(__file__)
 
 # ==================== Logging Configuration ====================
@@ -88,7 +115,19 @@ connection_start_times = {}
 # ==================== Request Handlers ====================
 
 async def index(request):
-    """Serve the main HTML interface."""
+    """
+    Serve the main HTML interface for the WebRTC monitor.
+    
+    Loads and returns the index.html static file to clients accessing the root path.
+    This provides the browser-based UI for WebRTC peer connection monitoring.
+    
+    Args:
+        request: aiohttp.web.Request object containing client connection information
+    
+    Returns:
+        web.Response: HTML content with content-type text/html
+        web.Response (500): On file read or processing errors
+    """
     try:
         client_ip = request.remote or 'unknown'
         logger.info(f"Serving UI to {client_ip}")
@@ -103,15 +142,79 @@ async def index(request):
         return web.Response(status=500, text="Internal Server Error")
 
 async def offer(request):
-    """Handle WebRTC offer negotiation."""
+    """
+    Handle WebRTC SDP offer and generate answer for peer connection negotiation.
+    
+    This is the core signaling endpoint implementing the WebRTC offer/answer exchange:
+    1. Receives SDP (Session Description Protocol) offer from client browser
+    2. Creates a new RTCPeerConnection on the server
+    3. Sets the remote description (client's offer) on the peer connection
+    4. Generates a local answer with server capabilities
+    5. Returns the answer SDP back to the client
+    
+    The client then uses this answer to establish the WebRTC connection.
+    This endpoint handles the server side of the WebRTC signaling protocol.
+    
+    Args:
+        request: aiohttp.web.Request containing JSON payload with:
+            - sdp (str): Session Description Protocol string from client offer
+            - type (str): Description type (should be "offer")
+    
+    Returns:
+        web.Response (200): JSON with answer SDP and type on success
+        web.Response (400): On missing/invalid offer parameters
+        web.Response (500): On SDP processing or peer connection errors
+    
+    Side Effects:
+        - Creates a new RTCPeerConnection and adds it to the pcs set
+        - Registers event handlers for connection state changes and track reception
+        - Updates connection statistics (total, active, failed)
+    """
     pc = None
     pc_id = None
     connection_start_time = None
     
+    # ==================== WebRTC SIGNALING FLOW ====================
+    # This endpoint implements the server-side of the WebRTC Offer/Answer model:
+    #
+    # CLIENT (Browser)                  SIGNALING (HTTP)              SERVER
+    # ==================              =================              =========
+    #         |                                                          |
+    #         |  1. Generate Offer                                       |
+    #         |     (codecs, ICE candidates)                             |
+    #         |                                                          |
+    #         |  2. POST /offer (with offer SDP)                         |
+    #         |----------------------------------------------------->    |
+    #         |                                                          |
+    #         |                     3. Create RTCPeerConnection          |
+    #         |                        Set remote description (offer)    |
+    #         |                        Create answer (server capabilities)|
+    #         |                        Set local description (answer)    |
+    #         |                                                          |
+    #         |  4. HTTP 200 (with answer SDP)                           |
+    #         |<-----------------------------------------------------    |
+    #         |                                                          |
+    #         |  5. Set remote description (answer)                      |
+    #         |     Begin ICE candidate gathering & exchange             |
+    #         |                                                          |
+    #         |  6. Exchange ICE candidates via signaling                |
+    #         |  ======> (ICE trickle) <======                           |
+    #         |                                                          |
+    #         |  7. DTLS-SRTP connection established                     |
+    #         |<========== WebRTC Media Flow (encrypted) =========>      |
+    #         |                                                          |
+    #
+    # After successful negotiation, both client and server maintain their
+    # RTCPeerConnection objects and can exchange media streams directly
+    # using the established DTLS-SRTP tunnel. The server monitors connection
+    # state changes, received tracks, and handles graceful disconnection.
+    #
     try:
         client_ip = request.remote or 'unknown'
         
-        # Parse request
+        # ========== STAGE 1: PARSE SIGNALING MESSAGE ==========
+        # Receive and validate the SDP offer from the client browser.
+        # The offer contains the client's media capabilities and ICE candidates info.
         try:
             params = await request.json()
             offer_sdp = params.get("sdp")
@@ -136,7 +239,10 @@ async def offer(request):
                 text=json.dumps({"error": "Invalid JSON"})
             )
         
-        # Create peer connection
+        # ========== STAGE 2: CREATE PEER CONNECTION ==========
+        # Initialize a new RTCPeerConnection on the server. Each client gets a unique
+        # peer connection object that will handle the bidirectional WebRTC communication.
+        # The connection state machine manages: new -> connecting -> connected/failed -> closed
         offer = RTCSessionDescription(sdp=offer_sdp, type=offer_type)
         pc = RTCPeerConnection()
         pc_id = f"PC-{uuid.uuid4().hex[:8]}"
@@ -148,7 +254,10 @@ async def offer(request):
         
         logger.info(f"[{pc_id}] Peer connection created from {client_ip} (total: {stats['connections_active']} active)")
         
-        # Connection state change handler
+        # ========== STAGE 3: REGISTER CONNECTION STATE HANDLER ==========
+        # Monitor peer connection lifecycle events. This callback fires when the connection
+        # state changes (connected, failed, disconnected, closed). Used to track metrics and
+        # clean up resources when connections end.
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
             state = pc.connectionState
@@ -181,6 +290,10 @@ async def offer(request):
         # Track handler
         @pc.on("track")
         def on_track(track):
+            # ========== STAGE 4B: RECEIVE REMOTE MEDIA TRACKS ==========
+            # When the remote peer sends audio/video, this handler is triggered.
+            # Each track represents a stream (audio or video) from the client.
+            # Register track-ended handler to detect when client stops sending media.
             stats['tracks_received'] += 1
             logger.info(f"[{pc_id}] Track received: {track.kind} (codec: {track.codec_context.codec.name if hasattr(track, 'codec_context') else 'unknown'})")
             logger.debug(f"[{pc_id}] Track details - kind: {track.kind}, mid: {track.mid}")
@@ -195,8 +308,9 @@ async def offer(request):
         await pc.setRemoteDescription(offer)
         logger.debug(f"[{pc_id}] Remote description set")
         
-        # Create and set local description
-        logger.debug(f"[{pc_id}] Creating answer")
+        # ========== STAGE 4A: ANSWER NEGOTIATION ==========
+        # Create an answer SDP that describes our server's media capabilities
+        # and network configuration, based on the client's offer.
         answer = await pc.createAnswer()
         
         logger.debug(f"[{pc_id}] Setting local description")
@@ -208,6 +322,10 @@ async def offer(request):
             "type": pc.localDescription.type
         }
         
+        # ========== STAGE 5: SEND ANSWER BACK TO CLIENT ==========
+        # Return the answer SDP to the client. The client will set this as their
+        # remote description, completing the SDP negotiation. After this, both
+        # sides have agreed on media formats, codecs, and connection parameters.
         logger.info(f"[{pc_id}] Sending answer to {client_ip}")
         return web.Response(
             content_type="application/json",
@@ -235,7 +353,24 @@ async def offer(request):
         )
 
 async def stats_handler(request):
-    """Return application statistics."""
+    """
+    Return real-time application statistics and connection metrics.
+    
+    Provides a JSON snapshot of the server's current state including:
+    - Total connections created since startup
+    - Currently active peer connections
+    - Failed connection attempts
+    - Received and ended media tracks
+    - Application errors encountered
+    
+    Used by monitoring dashboards to display server health and connection stats.
+    
+    Args:
+        request: aiohttp.web.Request object
+    
+    Returns:
+        web.Response: JSON object with timestamp, stats dictionary, and active connection count
+    """
     return web.Response(
         content_type="application/json",
         text=json.dumps({
@@ -246,7 +381,18 @@ async def stats_handler(request):
     )
 
 async def health_check(request):
-    """Health check endpoint."""
+    """
+    Perform basic health check and return server status.
+    
+    Provides a lightweight endpoint for monitoring systems to verify the server
+    is running and accepting connections. Includes current active connection count.
+    
+    Args:
+        request: aiohttp.web.Request object
+    
+    Returns:
+        web.Response: JSON object with status, active connection count, and current timestamp
+    """
     logger.debug(f"Health check from {request.remote}")
     return web.Response(
         content_type="application/json",
@@ -260,7 +406,16 @@ async def health_check(request):
 # ==================== Lifecycle Handlers ====================
 
 async def on_startup(app):
-    """Log application startup."""
+    """
+    Application startup lifecycle hook.
+    
+    Initializes and logs the server startup sequence. Displays configuration,
+    process information, and readiness status. Called once when the aiohttp
+    server starts accepting connections.
+    
+    Args:
+        app: aiohttp.web.Application instance containing host and port configuration
+    """
     logger.info("=" * 60)
     logger.info("Monpitor WebRTC Server Starting")
     logger.info("=" * 60)
@@ -272,7 +427,21 @@ async def on_startup(app):
     logger.info("=" * 60)
 
 async def on_shutdown(app):
-    """Gracefully shutdown all connections."""
+    """
+    Application shutdown lifecycle hook.
+    
+    Gracefully terminates all active peer connections and logs shutdown metrics.
+    Ensures all WebRTC connections are properly closed before server stops,
+    preventing resource leaks and unclean client disconnections.
+    
+    Args:
+        app: aiohttp.web.Application instance
+    
+    Side Effects:
+        - Closes all RTCPeerConnection objects in the pcs set
+        - Clears the pcs set
+        - Logs final statistics
+    """
     logger.info("=" * 60)
     logger.info("Monpitor WebRTC Server Shutting Down")
     logger.info("=" * 60)
@@ -297,7 +466,25 @@ async def on_shutdown(app):
 
 @web.middleware
 async def logging_middleware(request, handler):
-    """Log HTTP requests and responses."""
+    """
+    HTTP request/response logging middleware.
+    
+    Logs all incoming HTTP requests and outgoing responses with timing information
+    and client IP address. Tracks both successful responses and exceptions.
+    Captures performance metrics and error diagnostics.
+    
+    Args:
+        request: aiohttp.web.Request object
+        handler: Callable async function that processes the request
+    
+    Returns:
+        web.Response: Response from the handler
+    
+    Side Effects:
+        - Logs request method, path, status code, duration, and client IP
+        - Increments stats['errors'] on exception
+        - Re-raises exceptions for further processing
+    """
     start_time = time.time()
     
     try:

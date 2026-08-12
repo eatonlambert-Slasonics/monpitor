@@ -18,3 +18,122 @@
 2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): Final Statistics: {'connections_total': 0, 'connections_active': 0, 'connections_failed': 0, 'tracks_received': 0, 'tracks_ended': 0, 'errors': 0}
 2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): Shutdown complete
 2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 04:59:40 [INFO    ] root - setup_logging(): File logging enabled: /home/tone/projects/monpitor/monpitor.log
+2026-08-12 04:59:40 [INFO    ] root - <module>(): Starting server on 0.0.0.0:8080
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): Monpitor WebRTC Server Starting
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): Host: 0.0.0.0
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): Port: 8080
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): Process ID: 4895
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): Log Level: INFO
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): Ready to accept connections
+2026-08-12 04:59:40 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 04:59:51 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 04:59:51 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:04:59:51 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 04:59:56 [WARNING ] root - logging_middleware(): GET /favicon.ico -> 404 (0.05ms) [100.112.233.24]
+2026-08-12 04:59:56 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:04:59:56 -0700] "GET /favicon.ico HTTP/1.1" 404 174 "http://monpitor:8080/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:05:36 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:05:36 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:05:36 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:06:43 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:06:43 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:06:43 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): Monpitor WebRTC Server Shutting Down
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): Active connections: 0
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): All connections closed
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): Final Statistics: {'connections_total': 0, 'connections_active': 0, 'connections_failed': 0, 'tracks_received': 0, 'tracks_ended': 0, 'errors': 0}
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): Shutdown complete
+2026-08-12 05:17:43 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:18:02 [INFO    ] root - setup_logging(): File logging enabled: /home/tone/projects/monpitor/monpitor.log
+2026-08-12 05:18:02 [INFO    ] root - <module>(): Starting server on 0.0.0.0:8080
+2026-08-12 05:18:02 [DEBUG   ] asyncio - __init__(): Using selector: EpollSelector
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): Monpitor WebRTC Server Starting
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): Host: 0.0.0.0
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): Port: 8080
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): Process ID: 5486
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): Log Level: DEBUG
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): Ready to accept connections
+2026-08-12 05:18:02 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:18:10 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:18:10 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:18:10 [DEBUG   ] root - logging_middleware(): GET / -> 200 (4.93ms) [100.112.233.24]
+2026-08-12 05:18:10 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:18:10 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:21:47 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:21:47 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:21:47 [DEBUG   ] root - logging_middleware(): GET / -> 200 (3.90ms) [100.112.233.24]
+2026-08-12 05:21:47 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:21:47 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:22:29 [INFO    ] root - index(): Serving UI to 127.0.0.1
+2026-08-12 05:22:29 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:22:29 [DEBUG   ] root - logging_middleware(): GET / -> 200 (3.64ms) [127.0.0.1]
+2026-08-12 05:22:29 [INFO    ] aiohttp.access - log(): 127.0.0.1 [12/Aug/2026:05:22:29 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.132.1 Chrome/148.0.7778.280 Electron/42.7.1 Safari/537.36"
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): Monpitor WebRTC Server Shutting Down
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): Active connections: 0
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): All connections closed
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): Final Statistics: {'connections_total': 0, 'connections_active': 0, 'connections_failed': 0, 'tracks_received': 0, 'tracks_ended': 0, 'errors': 0}
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): Shutdown complete
+2026-08-12 05:24:24 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:24:41 [INFO    ] root - setup_logging(): File logging enabled: /home/tone/projects/monpitor/monpitor.log
+2026-08-12 05:24:41 [INFO    ] root - <module>(): Starting server on 0.0.0.0:8080
+2026-08-12 05:24:41 [DEBUG   ] asyncio - __init__(): Using selector: EpollSelector
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): Monpitor WebRTC Server Starting
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): Host: 0.0.0.0
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): Port: 8080
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): Process ID: 5917
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): Log Level: DEBUG
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): Ready to accept connections
+2026-08-12 05:24:41 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:24:49 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:24:49 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:24:49 [DEBUG   ] root - logging_middleware(): GET / -> 200 (4.82ms) [100.112.233.24]
+2026-08-12 05:24:49 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:24:49 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): Monpitor WebRTC Server Shutting Down
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): Active connections: 0
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): All connections closed
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): Final Statistics: {'connections_total': 0, 'connections_active': 0, 'connections_failed': 0, 'tracks_received': 0, 'tracks_ended': 0, 'errors': 0}
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): Shutdown complete
+2026-08-12 05:25:23 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 05:25:30 [INFO    ] root - setup_logging(): File logging enabled: /home/tone/projects/monpitor/monpitor.log
+2026-08-12 05:25:30 [INFO    ] root - <module>(): Starting server on 0.0.0.0:8080
+2026-08-12 05:25:30 [DEBUG   ] asyncio - __init__(): Using selector: EpollSelector
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): Monpitor WebRTC Server Starting
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): Host: 0.0.0.0
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): Port: 8080
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): Process ID: 6017
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): Log Level: DEBUG
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): Ready to accept connections
+2026-08-12 05:25:30 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:25:37 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:25:37 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:25:37 [DEBUG   ] root - logging_middleware(): GET / -> 200 (3.51ms) [100.112.233.24]
+2026-08-12 05:25:37 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:25:37 -0700] "GET / HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:25:48 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:25:48 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:25:48 [DEBUG   ] root - logging_middleware(): GET / -> 200 (3.28ms) [100.112.233.24]
+2026-08-12 05:25:48 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:25:48 -0700] "GET /?sdfs=sdfs HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+2026-08-12 05:48:32 [INFO    ] root - setup_logging(): File logging enabled: /home/tone/projects/monpitor/monpitor.log
+2026-08-12 05:48:32 [INFO    ] root - <module>(): Starting server on 0.0.0.0:8080
+2026-08-12 05:48:32 [DEBUG   ] asyncio - __init__(): Using selector: EpollSelector
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): Monpitor WebRTC Server Starting
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): Host: 0.0.0.0
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): Port: 8080
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): Process ID: 3283
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): Log Level: DEBUG
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): Ready to accept connections
+2026-08-12 05:48:32 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 05:49:28 [INFO    ] root - index(): Serving UI to 100.112.233.24
+2026-08-12 05:49:28 [DEBUG   ] root - index(): UI content loaded (12477 bytes)
+2026-08-12 05:49:28 [DEBUG   ] root - logging_middleware(): GET / -> 200 (4.88ms) [100.112.233.24]
+2026-08-12 05:49:28 [INFO    ] aiohttp.access - log(): 100.112.233.24 [12/Aug/2026:05:49:28 -0700] "GET /?sdfs=sdfs HTTP/1.1" 200 12632 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
