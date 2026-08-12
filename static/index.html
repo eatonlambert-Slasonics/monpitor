@@ -73,32 +73,133 @@
     </div>
 
     <script>
+        // ==================== Client Logging ====================
+        
+        const ClientLogger = {
+            logs: [],
+            maxLogs: 100,
+            
+            log: function(level, message, data) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = {
+                    timestamp: timestamp,
+                    level: level,
+                    message: message,
+                    data: data
+                };
+                
+                this.logs.push(logEntry);
+                if (this.logs.length > this.maxLogs) {
+                    this.logs.shift();
+                }
+                
+                // Console output with formatting
+                const prefix = `[${timestamp}] [${level}]`;
+                const output = data ? `${prefix} ${message}: ${JSON.stringify(data)}` : `${prefix} ${message}`;
+                
+                if (level === 'ERROR') {
+                    console.error(output);
+                } else if (level === 'WARN') {
+                    console.warn(output);
+                } else if (level === 'DEBUG') {
+                    console.debug(output);
+                } else {
+                    console.log(output);
+                }
+            },
+            
+            debug: function(message, data) { this.log('DEBUG', message, data); },
+            info: function(message, data) { this.log('INFO', message, data); },
+            warn: function(message, data) { this.log('WARN', message, data); },
+            error: function(message, data) { this.log('ERROR', message, data); },
+            
+            getLogs: function() { return this.logs; }
+        };
+        
+        // Override console for comprehensive logging
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            ClientLogger.info(args.join(' '));
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            ClientLogger.error(args.join(' '));
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            ClientLogger.warn(args.join(' '));
+        };
+        
+        // ==================== WebRTC Application ====================
+        
         var pc = null;
+        var sessionId = null;
 
         function updateStatus(text, connected) {
             document.getElementById('status').innerText = text;
             document.getElementById('status-container').className = connected ? 'connected' : '';
+            ClientLogger.info('Status updated', { text: text, connected: connected });
         }
 
         function createPeerConnection() {
+            ClientLogger.info('Creating peer connection');
+            
             var config = {
                 sdpSemantics: 'unified-plan',
                 iceServers: [{urls: ['stun:stun.l.google.com:19302']}]
             };
 
             pc = new RTCPeerConnection(config);
+            ClientLogger.debug('RTCPeerConnection created', { config: config });
 
+            // Connection state change
+            pc.addEventListener('connectionstatechange', function() {
+                ClientLogger.info('Connection state changed', { state: pc.connectionState });
+                updateStatus(pc.connectionState, false);
+            });
+
+            // ICE connection state change
             pc.addEventListener('iceconnectionstatechange', function() {
-                updateStatus(pc.iceConnectionState, pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed');
+                const connected = pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed';
+                ClientLogger.info('ICE connection state changed', { state: pc.iceConnectionState, connected: connected });
+                updateStatus(pc.iceConnectionState, connected);
+            });
+
+            // ICE gathering state
+            pc.addEventListener('icegatheringstatechange', function() {
+                ClientLogger.debug('ICE gathering state changed', { state: pc.iceGatheringState });
+            });
+
+            // ICE candidate
+            pc.addEventListener('icecandidate', function(event) {
+                if (event.candidate) {
+                    ClientLogger.debug('ICE candidate generated', { candidate: event.candidate });
+                } else {
+                    ClientLogger.debug('ICE candidate generation complete');
+                }
+            });
+
+            // Connection failure
+            pc.addEventListener('connectionfailure', function() {
+                ClientLogger.error('Connection failure detected');
             });
 
             return pc;
         }
 
         async function start() {
+            sessionId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            ClientLogger.info('Cast session starting', { sessionId: sessionId });
             updateStatus('Requesting screen...', false);
             
             try {
+                ClientLogger.debug('Requesting display media');
                 const stream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
                         cursor: "always"
@@ -106,23 +207,53 @@
                     audio: false
                 });
 
+                ClientLogger.info('Display media acquired', {
+                    tracks: stream.getTracks().length,
+                    videoTracks: stream.getVideoTracks().length
+                });
+
                 document.getElementById('video').srcObject = stream;
                 pc = createPeerConnection();
 
-                stream.getTracks().forEach(function(track) {
-                    pc.addTrack(track, stream);
+                // Add track event listener
+                pc.addEventListener('track', function(event) {
+                    ClientLogger.info('Track received from remote peer', {
+                        kind: event.track.kind,
+                        id: event.track.id
+                    });
                 });
 
+                // Add tracks to peer connection
+                var trackCount = 0;
+                stream.getTracks().forEach(function(track) {
+                    pc.addTrack(track, stream);
+                    trackCount++;
+                    ClientLogger.debug('Track added to peer connection', {
+                        kind: track.kind,
+                        id: track.id
+                    });
+                });
+
+                ClientLogger.info('Creating WebRTC offer', { tracks: trackCount });
                 const offer = await pc.createOffer();
+                ClientLogger.debug('Offer created', {
+                    type: offer.type,
+                    sdpLength: offer.sdp.length
+                });
+
                 await pc.setLocalDescription(offer);
+                ClientLogger.debug('Local description set');
 
                 // Wait for ICE gathering
+                ClientLogger.debug('Waiting for ICE candidate gathering');
                 await new Promise(function(resolve) {
                     if (pc.iceGatheringState === 'complete') {
+                        ClientLogger.debug('ICE gathering already complete');
                         resolve();
                     } else {
                         function checkState() {
                             if (pc.iceGatheringState === 'complete') {
+                                ClientLogger.debug('ICE gathering complete');
                                 pc.removeEventListener('icegatheringstatechange', checkState);
                                 resolve();
                             }
@@ -133,6 +264,7 @@
 
                 updateStatus('Connecting to Pi...', false);
 
+                ClientLogger.info('Sending offer to server', { sessionId: sessionId });
                 const response = await fetch('/offer', {
                     body: JSON.stringify({
                         sdp: pc.localDescription.sdp,
@@ -144,14 +276,51 @@
                     method: 'POST'
                 });
 
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(`Server returned ${response.status}: ${errorData.error || 'Unknown error'}`);
+                }
+
+                ClientLogger.info('Offer sent successfully');
                 const answer = await response.json();
-                await pc.setRemoteDescription(answer);
                 
+                ClientLogger.debug('Answer received from server', {
+                    type: answer.type,
+                    sdpLength: answer.sdp.length
+                });
+
+                await pc.setRemoteDescription(answer);
+                ClientLogger.info('Remote description set - connection negotiation complete');
+                
+                updateStatus('Connected', true);
                 document.querySelector('.controls').style.display = 'none';
+                
+                ClientLogger.info('Cast session established successfully', { sessionId: sessionId });
             } catch (e) {
+                ClientLogger.error('Cast session failed', {
+                    sessionId: sessionId,
+                    error: e.message,
+                    stack: e.stack
+                });
                 updateStatus('Error: ' + e.message, false);
+                
+                // Log all collected logs to console for debugging
+                console.group('Cast Session Logs');
+                ClientLogger.getLogs().forEach(log => {
+                    console.log(`${log.timestamp} [${log.level}] ${log.message}`, log.data || '');
+                });
+                console.groupEnd();
             }
         }
+
+        // Initialize logging on page load
+        window.addEventListener('load', function() {
+            ClientLogger.info('Page loaded and ready');
+            ClientLogger.debug('Browser capabilities', {
+                hasWebRTC: typeof RTCPeerConnection !== 'undefined',
+                hasGetDisplayMedia: navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function'
+            });
+        });
 
         document.getElementById('start').addEventListener('click', start);
     </script>

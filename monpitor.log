@@ -1,0 +1,20 @@
+2026-08-12 03:45:55 [INFO    ] root - setup_logging(): File logging enabled: /home/tone/projects/monpitor/monpitor.log
+2026-08-12 03:45:55 [INFO    ] root - <module>(): Starting server on 0.0.0.0:8080
+2026-08-12 03:45:55 [DEBUG   ] asyncio - __init__(): Using selector: EpollSelector
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): Monpitor WebRTC Server Starting
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): Host: 0.0.0.0
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): Port: 8080
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): Process ID: 15035
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): Log Level: DEBUG
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): Ready to accept connections
+2026-08-12 03:45:55 [INFO    ] root - on_startup(): ============================================================
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): Monpitor WebRTC Server Shutting Down
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): ============================================================
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): Active connections: 0
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): All connections closed
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): Final Statistics: {'connections_total': 0, 'connections_active': 0, 'connections_failed': 0, 'tracks_received': 0, 'tracks_ended': 0, 'errors': 0}
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): Shutdown complete
+2026-08-12 03:45:55 [INFO    ] root - on_shutdown(): ============================================================
