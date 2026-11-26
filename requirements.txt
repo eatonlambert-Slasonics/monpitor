@@ -1,3 +1,4 @@
-aiohttp
-aiortc
-av
+aiohttp>=3.9
+# Cast mode only; MonPitor still runs the log display without these.
+aiortc>=1.9
+av>=12

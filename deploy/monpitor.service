@@ -1,0 +1,22 @@
+[Unit]
+Description=MonPitor overnight-runs display
+After=network-online.target
+Wants=network-online.target
+# MonPitor owns the HDMI console instead of a login prompt.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=@USER@
+SupplementaryGroups=tty video render
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python @DIR@/server.py --config @DIR@/monpitor.toml
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
