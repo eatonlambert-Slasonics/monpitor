@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MonPitor cast</title>
+<style>
+  body { margin:0; background:#1a1a1a; color:#fff; font-family:system-ui, sans-serif; min-height:100vh;
+         display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:16px; box-sizing:border-box; }
+  video { width:min(90vw, 960px); background:#000; border-radius:8px; }
+  button { padding:12px 24px; font-size:16px; font-weight:600; border:0; border-radius:6px; cursor:pointer; color:#fff; background:#2ecc71; }
+  button.stop { background:#e74c3c; }
+  #status { opacity:.8; }
+  a { color:#9cf; }
+</style>
+</head>
+<body>
+  <div id="status">Ready. Your screen will show on the Pi until you stop.</div>
+  <video id="preview" autoplay playsinline muted></video>
+  <div>
+    <button id="start">Cast screen</button>
+    <button id="stop" class="stop" hidden>Stop casting</button>
+  </div>
+  <a href="/">Back to logs</a>
+<script>
+  let pc = null, stream = null;
+  const statusEl = document.getElementById('status');
+  const say = (t) => { statusEl.textContent = t; };
+
+  async function start() {
+    try {
+      say('Choose a screen or window…');
+      // Ask for a modest size: the Pi 3 decodes in software.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 30 } },
+        audio: false,
+      });
+      document.getElementById('preview').srcObject = stream;
+      stream.getVideoTracks()[0].addEventListener('ended', stop);
+
+      pc = new RTCPeerConnection();  // same LAN, so no STUN server needed
+      pc.addEventListener('connectionstatechange', () => {
+        say('Connection: ' + pc.connectionState);
+        if (pc.connectionState === 'failed') stop();
+      });
+      stream.getTracks().forEach((t) => pc.addTransceiver(t, { direction: 'sendonly', streams: [stream] }));
+
+      await pc.setLocalDescription(await pc.createOffer());
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') return resolve();
+        const check = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', check); resolve(); } };
+        pc.addEventListener('icegatheringstatechange', check);
+        setTimeout(resolve, 3000);  // LAN candidates arrive fast; don't hang on slow ones
+      });
+
+      say('Connecting to the Pi…');
+      const res = await fetch('/offer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
+      });
+      const answer = await res.json();
+      if (!res.ok) throw new Error(answer.error || res.status);
+      await pc.setRemoteDescription(answer);
+      document.getElementById('start').hidden = true;
+      document.getElementById('stop').hidden = false;
+    } catch (e) {
+      say('Could not cast: ' + e.message);
+      cleanup();
+    }
+  }
+
+  function cleanup() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    if (pc) pc.close();
+    pc = stream = null;
+    document.getElementById('start').hidden = false;
+    document.getElementById('stop').hidden = true;
+  }
+
+  async function stop() {
+    cleanup();
+    await fetch('/cast/stop', { method: 'POST' }).catch(() => {});
+    say('Stopped. The Pi is back on the logs.');
+  }
+
+  document.getElementById('start').addEventListener('click', start);
+  document.getElementById('stop').addEventListener('click', stop);
+</script>
+</body>
+</html>

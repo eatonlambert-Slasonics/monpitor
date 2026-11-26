@@ -1,3 +1,13 @@
+"""MonPitor: a Raspberry Pi display for overnight-runs logs, with a screen-cast mode.
+
+Log mode (default): shows the live log of whichever overnight run is selected in
+the overnight-runs repo (``monitor/target``), or a finished run's report. It is
+drawn on the HDMI text console and also served at ``/`` for any browser.
+
+Cast mode: open ``/cast`` on a laptop, press Cast, and the Pi shows that screen
+full screen until the cast stops. Then the log view comes back.
+"""
+
 import argparse
 import asyncio
 import json
@@ -5,567 +15,256 @@ import logging
 import logging.handlers
 import os
 import ssl
-import time
-import uuid
-from datetime import datetime
 
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from aiortc.contrib.media import MediaRelay
 
-"""
-Monpitor WebRTC Signaling Server
+from monpitor import config as config_mod
+from monpitor.console import ConsoleRenderer
+from monpitor.logsource import LineBuffer, LiveTail, load_report
+from monpitor.target import TargetWatcher
 
-A lightweight WebRTC signaling and media relay server optimized for Raspberry Pi 3.
-Handles peer connection negotiation via the Offer/Answer protocol and manages
-bidirectional media streams.
+ROOT = os.path.dirname(os.path.abspath(__file__))
+log = logging.getLogger("monpitor")
 
-Architecture:
-- Signaling: HTTP-based SDP negotiation endpoints (/offer, /stats, /health)
-- Peer Connections: Maintains active RTCPeerConnection objects for each client
-- Media Relay: Optional media relay for connection routing and stream management
-- Logging: Comprehensive async logging with file rotation
 
-Key Features:
-- Asynchronous I/O for efficient resource usage on constrained hardware
-- WebRTC SDP offer/answer negotiation
-- Connection state tracking and metrics
-- Graceful shutdown with connection cleanup
-- Comprehensive error handling and logging
+def setup_logging(verbose, log_file):
+    """Log to stderr (journald) and a small rotating file."""
+    level = logging.DEBUG if verbose else logging.INFO
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(level)
+    handlers = [logging.StreamHandler()]
+    if log_file:
+        handlers.append(logging.handlers.RotatingFileHandler(log_file, maxBytes=1_000_000, backupCount=2))
+    for h in handlers:
+        h.setFormatter(fmt)
+        root.addHandler(h)
+    for noisy in ("aioice", "aiortc", "aiohttp.access"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
-Performance Optimizations:
-- Low memory footprint for Raspberry Pi 3 (1GB RAM)
-- Non-blocking I/O with asyncio
-- Efficient media relay using aiortc MediaRelay
-- Rotating file logs to prevent disk fill
-"""
 
-ROOT = os.path.dirname(__file__)
+class Monitor:
+    """Ties the target watcher, the log source and the outputs together."""
 
-# ==================== Logging Configuration ====================
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.buffer = LineBuffer(cfg.buffer_lines)
+        self.console = ConsoleRenderer(cfg.tty, self.buffer) if cfg.console else None
+        self.watcher = TargetWatcher(cfg, self.set_view)
+        self.tail = None
+        self.view = None
+        self.state = ""
+        self.cast = None
+        self.casting = False
+        self.web_clients = set()
+        if cfg.cast_enabled:
+            from monpitor.cast import CastReceiver  # aiortc is only needed for cast mode
+            self.cast = CastReceiver(cfg, self.set_casting)
 
-def setup_logging(verbose=False, log_file=None):
-    """
-    Configure application logging with console and optional file handlers.
-    
-    Args:
-        verbose: Enable DEBUG level logging (default: INFO)
-        log_file: Path to log file (optional, default: None)
-    
-    Returns:
-        logger instance
-    """
-    log_level = logging.DEBUG if verbose else logging.INFO
-    
-    # Create formatters
-    console_formatter = logging.Formatter(
-        fmt='%(asctime)s [%(levelname)-8s] %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    file_formatter = logging.Formatter(
-        fmt='%(asctime)s [%(levelname)-8s] %(name)s - %(funcName)s(): %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # Get root logger
-    logger = logging.getLogger()
-    logger.setLevel(log_level)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
-    
-    # File handler with rotation (5MB max, keep 3 backups)
-    if log_file is None:
-        log_file = os.path.join(ROOT, 'monpitor.log')
-    
+    def set_view(self, view):
+        asyncio.create_task(self._apply(view))
+
+    async def _apply(self, view):
+        same_live = (self.view and self.view.kind == view.kind == "live" and self.view.host == view.host)
+        self.view = view
+        if not same_live:
+            if self.tail:
+                await self.tail.stop()
+                self.tail = None
+            self.buffer.clear()
+            if view.kind == "live":
+                self.tail = LiveTail(self.cfg.hosts.get(view.host) or config_mod.HostConfig(view.host),
+                                     self.buffer, self.set_state)
+                self.tail.start()
+            elif view.kind == "report":
+                self.set_state("")
+                load_report(view, self.buffer)
+            else:
+                self.set_state("")
+        if self.console:
+            self.console.set_view(view.title, view.note)
+        self.broadcast()
+
+    def set_state(self, state):
+        self.state = state
+        if self.console:
+            self.console.set_state(state)
+        self.broadcast()
+
+    def set_casting(self, active):
+        self.casting = active
+        if self.console:
+            self.console.pause(active)
+        self.broadcast()
+
+    def snapshot(self):
+        v = self.view
+        return {
+            "title": v.title if v else "Starting",
+            "kind": v.kind if v else "empty",
+            "host": v.host if v else "",
+            "project": v.project if v else "",
+            "note": v.note if v else "",
+            "state": self.state,
+            "casting": self.casting,
+            "repo_error": self.watcher.error,
+        }
+
+    def broadcast(self):
+        msg = {"view": self.snapshot()}
+        for q in list(self.web_clients):
+            try:
+                q.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
+
+
+# ==================== HTTP handlers ====================
+
+async def page(name):
+    path = os.path.join(ROOT, "static", name)
+
+    async def handler(request):
+        return web.FileResponse(path)
+    return handler
+
+
+async def api_state(request):
+    mon = request.app["monitor"]
+    return web.json_response({**mon.snapshot(), "lines": list(mon.buffer.lines)[-500:]})
+
+
+async def api_events(request):
+    """Server-sent events: view changes and new log lines."""
+    mon = request.app["monitor"]
+    resp = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
+    await resp.prepare(request)
+    lines = mon.buffer.subscribe()
+    views = asyncio.Queue(maxsize=100)
+    mon.web_clients.add(views)
     try:
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=5*1024*1024,  # 5MB
-            backupCount=3
-        )
-        file_handler.setLevel(log_level)
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
-        logger.info(f"File logging enabled: {log_file}")
-    except IOError as e:
-        logger.warning(f"Could not create file handler for {log_file}: {e}")
-    
-    return logger
+        await resp.write(f"data: {json.dumps({'view': mon.snapshot(), 'reset': True})}\n\n".encode())
+        for line in list(mon.buffer.lines)[-500:]:
+            await resp.write(f"data: {json.dumps({'line': line})}\n\n".encode())
+        while True:
+            getters = [asyncio.create_task(lines.get()), asyncio.create_task(views.get())]
+            done, pending = await asyncio.wait(getters, timeout=20, return_when=asyncio.FIRST_COMPLETED)
+            for p in pending:
+                p.cancel()
+            if not done:
+                await resp.write(b": keepalive\n\n")
+            for d in done:
+                await resp.write(f"data: {json.dumps(d.result())}\n\n".encode())
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    finally:
+        mon.buffer.unsubscribe(lines)
+        mon.web_clients.discard(views)
+    return resp
 
-# ==================== Application State ====================
-
-logger = logging.getLogger("monpitor.server")
-pcs = set()
-relay = MediaRelay()
-stats = {
-    'connections_total': 0,
-    'connections_active': 0,
-    'connections_failed': 0,
-    'tracks_received': 0,
-    'tracks_ended': 0,
-    'errors': 0
-}
-connection_start_times = {}
-
-# ==================== Request Handlers ====================
-
-async def index(request):
-    """
-    Serve the main HTML interface for the WebRTC monitor.
-    
-    Loads and returns the index.html static file to clients accessing the root path.
-    This provides the browser-based UI for WebRTC peer connection monitoring.
-    
-    Args:
-        request: aiohttp.web.Request object containing client connection information
-    
-    Returns:
-        web.Response: HTML content with content-type text/html
-        web.Response (500): On file read or processing errors
-    """
-    try:
-        client_ip = request.remote or 'unknown'
-        logger.info(f"Serving UI to {client_ip}")
-        
-        content = open(os.path.join(ROOT, "static/index.html"), "r").read()
-        logger.debug(f"UI content loaded ({len(content)} bytes)")
-        
-        return web.Response(content_type="text/html", text=content)
-    except Exception as e:
-        logger.error(f"Error serving index: {e}", exc_info=True)
-        stats['errors'] += 1
-        return web.Response(status=500, text="Internal Server Error")
 
 async def offer(request):
-    """
-    Handle WebRTC SDP offer and generate answer for peer connection negotiation.
-    
-    This is the core signaling endpoint implementing the WebRTC offer/answer exchange:
-    1. Receives SDP (Session Description Protocol) offer from client browser
-    2. Creates a new RTCPeerConnection on the server
-    3. Sets the remote description (client's offer) on the peer connection
-    4. Generates a local answer with server capabilities
-    5. Returns the answer SDP back to the client
-    
-    The client then uses this answer to establish the WebRTC connection.
-    This endpoint handles the server side of the WebRTC signaling protocol.
-    
-    Args:
-        request: aiohttp.web.Request containing JSON payload with:
-            - sdp (str): Session Description Protocol string from client offer
-            - type (str): Description type (should be "offer")
-    
-    Returns:
-        web.Response (200): JSON with answer SDP and type on success
-        web.Response (400): On missing/invalid offer parameters
-        web.Response (500): On SDP processing or peer connection errors
-    
-    Side Effects:
-        - Creates a new RTCPeerConnection and adds it to the pcs set
-        - Registers event handlers for connection state changes and track reception
-        - Updates connection statistics (total, active, failed)
-    """
-    pc = None
-    pc_id = None
-    connection_start_time = None
-    
-    # ==================== WebRTC SIGNALING FLOW ====================
-    # This endpoint implements the server-side of the WebRTC Offer/Answer model:
-    #
-    # CLIENT (Browser)                  SIGNALING (HTTP)              SERVER
-    # ==================              =================              =========
-    #         |                                                          |
-    #         |  1. Generate Offer                                       |
-    #         |     (codecs, ICE candidates)                             |
-    #         |                                                          |
-    #         |  2. POST /offer (with offer SDP)                         |
-    #         |----------------------------------------------------->    |
-    #         |                                                          |
-    #         |                     3. Create RTCPeerConnection          |
-    #         |                        Set remote description (offer)    |
-    #         |                        Create answer (server capabilities)|
-    #         |                        Set local description (answer)    |
-    #         |                                                          |
-    #         |  4. HTTP 200 (with answer SDP)                           |
-    #         |<-----------------------------------------------------    |
-    #         |                                                          |
-    #         |  5. Set remote description (answer)                      |
-    #         |     Begin ICE candidate gathering & exchange             |
-    #         |                                                          |
-    #         |  6. Exchange ICE candidates via signaling                |
-    #         |  ======> (ICE trickle) <======                           |
-    #         |                                                          |
-    #         |  7. DTLS-SRTP connection established                     |
-    #         |<========== WebRTC Media Flow (encrypted) =========>      |
-    #         |                                                          |
-    #
-    # After successful negotiation, both client and server maintain their
-    # RTCPeerConnection objects and can exchange media streams directly
-    # using the established DTLS-SRTP tunnel. The server monitors connection
-    # state changes, received tracks, and handles graceful disconnection.
-    #
+    mon = request.app["monitor"]
+    if not mon.cast:
+        return web.json_response({"error": "Cast mode is turned off in monpitor.toml"}, status=404)
     try:
-        client_ip = request.remote or 'unknown'
-        
-        # ========== STAGE 1: PARSE SIGNALING MESSAGE ==========
-        # Receive and validate the SDP offer from the client browser.
-        # The offer contains the client's media capabilities and ICE candidates info.
-        try:
-            params = await request.json()
-            offer_sdp = params.get("sdp")
-            offer_type = params.get("type")
-            
-            if not offer_sdp or not offer_type:
-                logger.warning(f"Invalid offer from {client_ip}: missing sdp or type")
-                stats['errors'] += 1
-                return web.Response(
-                    status=400,
-                    content_type="application/json",
-                    text=json.dumps({"error": "Missing sdp or type"})
-                )
-            
-            logger.debug(f"Offer received from {client_ip}")
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parse error from {client_ip}: {e}")
-            stats['errors'] += 1
-            return web.Response(
-                status=400,
-                content_type="application/json",
-                text=json.dumps({"error": "Invalid JSON"})
-            )
-        
-        # ========== STAGE 2: CREATE PEER CONNECTION ==========
-        # Initialize a new RTCPeerConnection on the server. Each client gets a unique
-        # peer connection object that will handle the bidirectional WebRTC communication.
-        # The connection state machine manages: new -> connecting -> connected/failed -> closed
-        offer = RTCSessionDescription(sdp=offer_sdp, type=offer_type)
-        pc = RTCPeerConnection()
-        pc_id = f"PC-{uuid.uuid4().hex[:8]}"
-        connection_start_time = time.time()
-        
-        pcs.add(pc)
-        stats['connections_total'] += 1
-        stats['connections_active'] += 1
-        
-        logger.info(f"[{pc_id}] Peer connection created from {client_ip} (total: {stats['connections_active']} active)")
-        
-        # ========== STAGE 3: REGISTER CONNECTION STATE HANDLER ==========
-        # Monitor peer connection lifecycle events. This callback fires when the connection
-        # state changes (connected, failed, disconnected, closed). Used to track metrics and
-        # clean up resources when connections end.
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            state = pc.connectionState
-            logger.info(f"[{pc_id}] Connection state changed: {state}")
-            
-            if state == "connected":
-                duration = time.time() - connection_start_time
-                logger.info(f"[{pc_id}] Connection established ({duration:.2f}s)")
-            
-            elif state == "failed":
-                stats['connections_failed'] += 1
-                stats['connections_active'] = max(0, stats['connections_active'] - 1)
-                logger.warning(f"[{pc_id}] Connection failed")
-                try:
-                    await pc.close()
-                except Exception as e:
-                    logger.error(f"[{pc_id}] Error closing connection: {e}")
-                finally:
-                    pcs.discard(pc)
-            
-            elif state == "disconnected":
-                stats['connections_active'] = max(0, stats['connections_active'] - 1)
-                logger.info(f"[{pc_id}] Connection disconnected (active: {stats['connections_active']})")
-            
-            elif state == "closed":
-                stats['connections_active'] = max(0, stats['connections_active'] - 1)
-                logger.info(f"[{pc_id}] Connection closed (active: {stats['connections_active']})")
-                pcs.discard(pc)
-        
-        # Track handler
-        @pc.on("track")
-        def on_track(track):
-            # ========== STAGE 4B: RECEIVE REMOTE MEDIA TRACKS ==========
-            # When the remote peer sends audio/video, this handler is triggered.
-            # Each track represents a stream (audio or video) from the client.
-            # Register track-ended handler to detect when client stops sending media.
-            stats['tracks_received'] += 1
-            logger.info(f"[{pc_id}] Track received: {track.kind} (codec: {track.codec_context.codec.name if hasattr(track, 'codec_context') else 'unknown'})")
-            logger.debug(f"[{pc_id}] Track details - kind: {track.kind}, mid: {track.mid}")
-            
-            @track.on("ended")
-            async def on_ended():
-                stats['tracks_ended'] += 1
-                logger.info(f"[{pc_id}] Track ended: {track.kind} (ended: {stats['tracks_ended']} total)")
-        
-        # Set remote description
-        logger.debug(f"[{pc_id}] Setting remote description")
-        await pc.setRemoteDescription(offer)
-        logger.debug(f"[{pc_id}] Remote description set")
-        
-        # ========== STAGE 4A: ANSWER NEGOTIATION ==========
-        # Create an answer SDP that describes our server's media capabilities
-        # and network configuration, based on the client's offer.
-        answer = await pc.createAnswer()
-        
-        logger.debug(f"[{pc_id}] Setting local description")
-        await pc.setLocalDescription(answer)
-        logger.debug(f"[{pc_id}] Local description set")
-        
-        response_data = {
-            "sdp": pc.localDescription.sdp,
-            "type": pc.localDescription.type
-        }
-        
-        # ========== STAGE 5: SEND ANSWER BACK TO CLIENT ==========
-        # Return the answer SDP to the client. The client will set this as their
-        # remote description, completing the SDP negotiation. After this, both
-        # sides have agreed on media formats, codecs, and connection parameters.
-        logger.info(f"[{pc_id}] Sending answer to {client_ip}")
-        return web.Response(
-            content_type="application/json",
-            text=json.dumps(response_data)
-        )
-    
-    except Exception as e:
-        stats['errors'] += 1
-        logger.error(f"[{pc_id}] Error handling offer: {e}", exc_info=True)
-        
-        # Clean up peer connection on error
-        if pc:
-            try:
-                await pc.close()
-            except Exception as close_error:
-                logger.error(f"[{pc_id}] Error closing failed connection: {close_error}")
-            finally:
-                pcs.discard(pc)
-                stats['connections_active'] = max(0, stats['connections_active'] - 1)
-        
-        return web.Response(
-            status=500,
-            content_type="application/json",
-            text=json.dumps({"error": str(e)})
-        )
-
-async def stats_handler(request):
-    """
-    Return real-time application statistics and connection metrics.
-    
-    Provides a JSON snapshot of the server's current state including:
-    - Total connections created since startup
-    - Currently active peer connections
-    - Failed connection attempts
-    - Received and ended media tracks
-    - Application errors encountered
-    
-    Used by monitoring dashboards to display server health and connection stats.
-    
-    Args:
-        request: aiohttp.web.Request object
-    
-    Returns:
-        web.Response: JSON object with timestamp, stats dictionary, and active connection count
-    """
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps({
-            "timestamp": datetime.now().isoformat(),
-            "stats": stats,
-            "connections_active": len(pcs)
-        }, indent=2)
-    )
-
-async def health_check(request):
-    """
-    Perform basic health check and return server status.
-    
-    Provides a lightweight endpoint for monitoring systems to verify the server
-    is running and accepting connections. Includes current active connection count.
-    
-    Args:
-        request: aiohttp.web.Request object
-    
-    Returns:
-        web.Response: JSON object with status, active connection count, and current timestamp
-    """
-    logger.debug(f"Health check from {request.remote}")
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps({
-            "status": "healthy",
-            "active_connections": len(pcs),
-            "timestamp": datetime.now().isoformat()
-        })
-    )
-
-# ==================== Lifecycle Handlers ====================
-
-async def on_startup(app):
-    """
-    Application startup lifecycle hook.
-    
-    Initializes and logs the server startup sequence. Displays configuration,
-    process information, and readiness status. Called once when the aiohttp
-    server starts accepting connections.
-    
-    Args:
-        app: aiohttp.web.Application instance containing host and port configuration
-    """
-    logger.info("=" * 60)
-    logger.info("Monpitor WebRTC Server Starting")
-    logger.info("=" * 60)
-    logger.info(f"Host: {app['host']}")
-    logger.info(f"Port: {app['port']}")
-    logger.info(f"Process ID: {os.getpid()}")
-    logger.info(f"Log Level: {'DEBUG' if logger.level == logging.DEBUG else 'INFO'}")
-    logger.info("Ready to accept connections")
-    logger.info("=" * 60)
-
-async def on_shutdown(app):
-    """
-    Application shutdown lifecycle hook.
-    
-    Gracefully terminates all active peer connections and logs shutdown metrics.
-    Ensures all WebRTC connections are properly closed before server stops,
-    preventing resource leaks and unclean client disconnections.
-    
-    Args:
-        app: aiohttp.web.Application instance
-    
-    Side Effects:
-        - Closes all RTCPeerConnection objects in the pcs set
-        - Clears the pcs set
-        - Logs final statistics
-    """
-    logger.info("=" * 60)
-    logger.info("Monpitor WebRTC Server Shutting Down")
-    logger.info("=" * 60)
-    logger.info(f"Active connections: {len(pcs)}")
-    
-    # Close all peer connections
-    coros = []
-    for pc in list(pcs):
-        logger.info(f"Closing peer connection: {pc}")
-        coros.append(pc.close())
-    
-    if coros:
-        await asyncio.gather(*coros, return_exceptions=True)
-    
-    pcs.clear()
-    logger.info("All connections closed")
-    logger.info(f"Final Statistics: {stats}")
-    logger.info("Shutdown complete")
-    logger.info("=" * 60)
-
-# ==================== Middleware ====================
-
-@web.middleware
-async def logging_middleware(request, handler):
-    """
-    HTTP request/response logging middleware.
-    
-    Logs all incoming HTTP requests and outgoing responses with timing information
-    and client IP address. Tracks both successful responses and exceptions.
-    Captures performance metrics and error diagnostics.
-    
-    Args:
-        request: aiohttp.web.Request object
-        handler: Callable async function that processes the request
-    
-    Returns:
-        web.Response: Response from the handler
-    
-    Side Effects:
-        - Logs request method, path, status code, duration, and client IP
-        - Increments stats['errors'] on exception
-        - Re-raises exceptions for further processing
-    """
-    start_time = time.time()
-    
+        params = await request.json()
+        sdp, kind = params["sdp"], params["type"]
+    except (ValueError, KeyError):
+        return web.json_response({"error": "Expected JSON with sdp and type"}, status=400)
     try:
-        response = await handler(request)
-        duration = time.time() - start_time
-        
-        # Log successful requests
-        logger.debug(
-            f"{request.method} {request.path} -> {response.status} ({duration*1000:.2f}ms) "
-            f"[{request.remote}]"
-        )
-        
-        return response
-    
-    except web.HTTPException as e:
-        duration = time.time() - start_time
-        logger.warning(
-            f"{request.method} {request.path} -> {e.status} ({duration*1000:.2f}ms) "
-            f"[{request.remote}]"
-        )
-        raise
-    
+        return web.json_response(await mon.cast.accept(sdp, kind))
     except Exception as e:
-        duration = time.time() - start_time
-        logger.error(
-            f"{request.method} {request.path} raised exception ({duration*1000:.2f}ms) "
-            f"[{request.remote}]: {e}",
-            exc_info=True
-        )
-        stats['errors'] += 1
-        raise
+        log.exception("Cast offer failed")
+        return web.json_response({"error": str(e)}, status=500)
 
-# ==================== Main ====================
+
+async def cast_stop(request):
+    mon = request.app["monitor"]
+    if mon.cast:
+        await mon.cast.close()
+    return web.json_response({"ok": True})
+
+
+async def health(request):
+    mon = request.app["monitor"]
+    return web.json_response({
+        "status": "ok",
+        "view": mon.snapshot(),
+        "cast": mon.cast.status() if mon.cast else None,
+    })
+
+
+async def build_app(cfg):
+    mon = Monitor(cfg)
+    app = web.Application()
+    app["monitor"] = mon
+    app.router.add_get("/", await page("index.html"))
+    app.router.add_get("/cast", await page("cast.html"))
+    app.router.add_get("/api/state", api_state)
+    app.router.add_get("/api/events", api_events)
+    app.router.add_post("/offer", offer)
+    app.router.add_post("/cast/stop", cast_stop)
+    app.router.add_get("/health", health)
+    app.router.add_static("/static/", os.path.join(ROOT, "static"))
+
+    async def start(app):
+        app["tasks"] = [asyncio.create_task(mon.watcher.run())]
+        if mon.console:
+            app["tasks"].append(asyncio.create_task(mon.console.run()))
+
+    async def stop(app):
+        for t in app["tasks"]:
+            t.cancel()
+        if mon.tail:
+            await mon.tail.stop()
+        if mon.cast:
+            await mon.cast.close()
+
+    app.on_startup.append(start)
+    app.on_shutdown.append(stop)
+    return app
+
+
+def main():
+    parser = argparse.ArgumentParser(description="MonPitor overnight-runs display")
+    parser.add_argument("--config", default=os.path.join(ROOT, "monpitor.toml"))
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--no-console", action="store_true", help="Do not draw on the HDMI console")
+    parser.add_argument("--https-port", type=int, default=8443,
+                        help="HTTPS port for /cast; browsers only allow screen capture on HTTPS")
+    parser.add_argument("--cert", default=os.path.join(ROOT, "certs", "monpitor.crt"))
+    parser.add_argument("--key", default=os.path.join(ROOT, "certs", "monpitor.key"))
+    parser.add_argument("--log-file", default=None)
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args()
+
+    setup_logging(args.verbose, args.log_file)
+    cfg = config_mod.load(args.config)
+    if args.no_console:
+        cfg.console = False
+    log.info("MonPitor on %s:%d, repo %s", args.host, args.port, cfg.checkout_path)
+    asyncio.run(serve(cfg, args))
+
+
+async def serve(cfg, args):
+    """Serve HTTP for the log page and, when a cert exists, HTTPS for casting."""
+    runner = web.AppRunner(await build_app(cfg))
+    await runner.setup()
+    await web.TCPSite(runner, args.host, args.port).start()
+    if os.path.exists(args.cert) and os.path.exists(args.key):
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.load_cert_chain(args.cert, args.key)
+        await web.TCPSite(runner, args.host, args.https_port, ssl_context=ctx).start()
+        log.info("Cast page: https://<pi>:%d/cast", args.https_port)
+    else:
+        log.warning("No TLS cert at %s: browsers will refuse screen capture over plain HTTP", args.cert)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="WebRTC monitor server for Raspberry Pi"
-    )
-    parser.add_argument(
-        "--host",
-        default="0.0.0.0",
-        help="Host for HTTP server (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8080,
-        help="Port for HTTP server (default: 8080)"
-    )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="count",
-        default=0,
-        help="Enable verbose logging (DEBUG level)"
-    )
-    parser.add_argument(
-        "--log-file",
-        type=str,
-        default=None,
-        help="Path to log file (default: monpitor.log in project root)"
-    )
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    logger = setup_logging(verbose=args.verbose > 0, log_file=args.log_file)
-    
-    # Create and configure app
-    app = web.Application(middlewares=[logging_middleware])
-    app['host'] = args.host
-    app['port'] = args.port
-    
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-    
-    # Routes
-    app.router.add_get("/", index)
-    app.router.add_post("/offer", offer)
-    app.router.add_get("/stats", stats_handler)
-    app.router.add_get("/health", health_check)
-    app.router.add_static("/static/", path=os.path.join(ROOT, "static"), name="static")
-    
-    logger.info(f"Starting server on {args.host}:{args.port}")
-    web.run_app(app, host=args.host, port=args.port, print=lambda *args: None)
+    main()

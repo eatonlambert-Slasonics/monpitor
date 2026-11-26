@@ -1,0 +1,33 @@
+# Copy to monpitor.toml and fill in the ssh addresses.
+
+[overnight]
+# The Pi keeps its own clone and checks it every poll_seconds.
+# Needs read access: a deploy key on overnight-runs, or an account key on the Pi.
+repo_url = "git@github.com:eatonlambert-Slasonics/overnight-runs.git"
+checkout = "~/overnight-runs"
+branch = "main"
+poll_seconds = 5
+
+# How the Pi reaches each machine for live logs (ssh key from the Pi, no password).
+[hosts.blackbox]
+ssh = "eaton-lambert@blackbox.local"
+log = "~/overnight-runs/run.log"
+
+[hosts.tbot]
+ssh = ""          # e.g. "pi@tbot.local"
+log = "~/overnight-runs/run.log"
+
+[hosts.whitebox]
+# The runner lives in WSL2, so this needs ssh into WSL (or a Windows ssh that runs wsl tail).
+ssh = ""
+log = "~/overnight-runs/run.log"
+
+[display]
+console = true        # draw on the HDMI text console
+tty = "/dev/tty1"
+buffer_lines = 2000
+
+[cast]
+enabled = true
+player = "mpv"
+max_width = 1280      # lower this if casting is choppy on the Pi 3

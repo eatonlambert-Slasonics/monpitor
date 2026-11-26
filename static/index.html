@@ -1,328 +1,67 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Raspberry Pi Wireless Monitor</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: #1a1a1a;
-            color: #ffffff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            overflow: hidden;
-        }
-        #video {
-            width: 90vw;
-            max-height: 80vh;
-            background: #000;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            border-radius: 8px;
-        }
-        #status {
-            margin-bottom: 20px;
-            padding: 10px 20px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            font-size: 0.9em;
-        }
-        .controls {
-            margin-top: 20px;
-        }
-        button {
-            padding: 12px 24px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            background: #2ecc71;
-            border: none;
-            color: white;
-            border-radius: 5px;
-            transition: background 0.3s;
-        }
-        button:hover {
-            background: #27ae60;
-        }
-        .status-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-            background: #e74c3c;
-        }
-        .connected .status-dot {
-            background: #2ecc71;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MonPitor</title>
+<style>
+  :root { --bg:#111; --fg:#ddd; --dim:#888; --bar:#1f3a5f; --ok:#2ecc71; --warn:#e67e22; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 ui-monospace, Menlo, Consolas, monospace;
+         height:100vh; display:flex; flex-direction:column; }
+  header { background:var(--bar); padding:8px 12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; flex:1; min-width:200px; }
+  header a { color:#fff; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:10px; background:rgba(255,255,255,.15); }
+  .live { background:var(--ok); color:#000; }
+  #note { color:var(--dim); padding:4px 12px; min-height:1.4em; }
+  #log { flex:1; overflow:auto; margin:0; padding:8px 12px; white-space:pre-wrap; word-break:break-word; }
+</style>
 </head>
 <body>
-    <div id="status-container">
-        <span class="status-dot"></span>
-        <span id="status">Disconnected</span>
-    </div>
-    <video id="video" autoplay playsinline muted></video>
-    <div class="controls">
-        <button id="start">Cast Screen</button>
-    </div>
+<header>
+  <h1 id="title">MonPitor</h1>
+  <span id="kind" class="pill">…</span>
+  <a id="castlink" href="/cast">Cast a screen</a>
+</header>
+<div id="note"></div>
+<pre id="log"></pre>
+<script>
+  // Screen capture needs HTTPS, which MonPitor serves on port 8443.
+  if (location.protocol === 'http:') document.getElementById('castlink').href = 'https://' + location.hostname + ':8443/cast';
+  const logEl = document.getElementById('log');
+  const MAX = 3000;
+  let follow = true;
+  logEl.addEventListener('scroll', () => {
+    follow = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
+  });
 
-    <script>
-        // ==================== Client Logging ====================
-        
-        const ClientLogger = {
-            logs: [],
-            maxLogs: 100,
-            
-            log: function(level, message, data) {
-                const timestamp = new Date().toLocaleTimeString();
-                const logEntry = {
-                    timestamp: timestamp,
-                    level: level,
-                    message: message,
-                    data: data
-                };
-                
-                this.logs.push(logEntry);
-                if (this.logs.length > this.maxLogs) {
-                    this.logs.shift();
-                }
-                
-                // Console output with formatting
-                const prefix = `[${timestamp}] [${level}]`;
-                const output = data ? `${prefix} ${message}: ${JSON.stringify(data)}` : `${prefix} ${message}`;
-                
-                if (level === 'ERROR') {
-                    console.error(output);
-                } else if (level === 'WARN') {
-                    console.warn(output);
-                } else if (level === 'DEBUG') {
-                    console.debug(output);
-                } else {
-                    console.log(output);
-                }
-            },
-            
-            debug: function(message, data) { this.log('DEBUG', message, data); },
-            info: function(message, data) { this.log('INFO', message, data); },
-            warn: function(message, data) { this.log('WARN', message, data); },
-            error: function(message, data) { this.log('ERROR', message, data); },
-            
-            getLogs: function() { return this.logs; }
-        };
-        
-        // Override console for comprehensive logging
-        const originalLog = console.log;
-        const originalError = console.error;
-        const originalWarn = console.warn;
-        
-        console.log = function(...args) {
-            originalLog.apply(console, args);
-            ClientLogger.info(args.join(' '));
-        };
-        
-        console.error = function(...args) {
-            originalError.apply(console, args);
-            ClientLogger.error(args.join(' '));
-        };
-        
-        console.warn = function(...args) {
-            originalWarn.apply(console, args);
-            ClientLogger.warn(args.join(' '));
-        };
-        
-        // ==================== WebRTC Application ====================
-        
-        var pc = null;
-        var sessionId = null;
+  function addLine(text) {
+    logEl.appendChild(document.createTextNode(text + '\n'));
+    while (logEl.childNodes.length > MAX) logEl.removeChild(logEl.firstChild);
+  }
 
-        function updateStatus(text, connected) {
-            document.getElementById('status').innerText = text;
-            document.getElementById('status-container').className = connected ? 'connected' : '';
-            ClientLogger.info('Status updated', { text: text, connected: connected });
-        }
+  function showView(v) {
+    document.getElementById('title').textContent = v.title;
+    const kind = document.getElementById('kind');
+    kind.textContent = v.casting ? 'casting' : v.kind;
+    kind.className = 'pill' + (v.kind === 'live' ? ' live' : '');
+    document.getElementById('note').textContent =
+      [v.note, v.state, v.repo_error && ('repo: ' + v.repo_error)].filter(Boolean).join('  ·  ');
+  }
 
-        function createPeerConnection() {
-            ClientLogger.info('Creating peer connection');
-            
-            var config = {
-                sdpSemantics: 'unified-plan',
-                iceServers: [{urls: ['stun:stun.l.google.com:19302']}]
-            };
-
-            pc = new RTCPeerConnection(config);
-            ClientLogger.debug('RTCPeerConnection created', { config: config });
-
-            // Connection state change
-            pc.addEventListener('connectionstatechange', function() {
-                ClientLogger.info('Connection state changed', { state: pc.connectionState });
-                updateStatus(pc.connectionState, false);
-            });
-
-            // ICE connection state change
-            pc.addEventListener('iceconnectionstatechange', function() {
-                const connected = pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed';
-                ClientLogger.info('ICE connection state changed', { state: pc.iceConnectionState, connected: connected });
-                updateStatus(pc.iceConnectionState, connected);
-            });
-
-            // ICE gathering state
-            pc.addEventListener('icegatheringstatechange', function() {
-                ClientLogger.debug('ICE gathering state changed', { state: pc.iceGatheringState });
-            });
-
-            // ICE candidate
-            pc.addEventListener('icecandidate', function(event) {
-                if (event.candidate) {
-                    ClientLogger.debug('ICE candidate generated', { candidate: event.candidate });
-                } else {
-                    ClientLogger.debug('ICE candidate generation complete');
-                }
-            });
-
-            // Connection failure
-            pc.addEventListener('connectionfailure', function() {
-                ClientLogger.error('Connection failure detected');
-            });
-
-            return pc;
-        }
-
-        async function start() {
-            sessionId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            ClientLogger.info('Cast session starting', { sessionId: sessionId });
-            updateStatus('Requesting screen...', false);
-            
-            try {
-                ClientLogger.debug('Requesting display media');
-                const stream = await navigator.mediaDevices.getDisplayMedia({
-                    video: {
-                        cursor: "always"
-                    },
-                    audio: false
-                });
-
-                ClientLogger.info('Display media acquired', {
-                    tracks: stream.getTracks().length,
-                    videoTracks: stream.getVideoTracks().length
-                });
-
-                document.getElementById('video').srcObject = stream;
-                pc = createPeerConnection();
-
-                // Add track event listener
-                pc.addEventListener('track', function(event) {
-                    ClientLogger.info('Track received from remote peer', {
-                        kind: event.track.kind,
-                        id: event.track.id
-                    });
-                });
-
-                // Add tracks to peer connection
-                var trackCount = 0;
-                stream.getTracks().forEach(function(track) {
-                    pc.addTrack(track, stream);
-                    trackCount++;
-                    ClientLogger.debug('Track added to peer connection', {
-                        kind: track.kind,
-                        id: track.id
-                    });
-                });
-
-                ClientLogger.info('Creating WebRTC offer', { tracks: trackCount });
-                const offer = await pc.createOffer();
-                ClientLogger.debug('Offer created', {
-                    type: offer.type,
-                    sdpLength: offer.sdp.length
-                });
-
-                await pc.setLocalDescription(offer);
-                ClientLogger.debug('Local description set');
-
-                // Wait for ICE gathering
-                ClientLogger.debug('Waiting for ICE candidate gathering');
-                await new Promise(function(resolve) {
-                    if (pc.iceGatheringState === 'complete') {
-                        ClientLogger.debug('ICE gathering already complete');
-                        resolve();
-                    } else {
-                        function checkState() {
-                            if (pc.iceGatheringState === 'complete') {
-                                ClientLogger.debug('ICE gathering complete');
-                                pc.removeEventListener('icegatheringstatechange', checkState);
-                                resolve();
-                            }
-                        }
-                        pc.addEventListener('icegatheringstatechange', checkState);
-                    }
-                });
-
-                updateStatus('Connecting to Pi...', false);
-
-                ClientLogger.info('Sending offer to server', { sessionId: sessionId });
-                const response = await fetch('/offer', {
-                    body: JSON.stringify({
-                        sdp: pc.localDescription.sdp,
-                        type: pc.localDescription.type,
-                    }),
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(`Server returned ${response.status}: ${errorData.error || 'Unknown error'}`);
-                }
-
-                ClientLogger.info('Offer sent successfully');
-                const answer = await response.json();
-                
-                ClientLogger.debug('Answer received from server', {
-                    type: answer.type,
-                    sdpLength: answer.sdp.length
-                });
-
-                await pc.setRemoteDescription(answer);
-                ClientLogger.info('Remote description set - connection negotiation complete');
-                
-                updateStatus('Connected', true);
-                document.querySelector('.controls').style.display = 'none';
-                
-                ClientLogger.info('Cast session established successfully', { sessionId: sessionId });
-            } catch (e) {
-                ClientLogger.error('Cast session failed', {
-                    sessionId: sessionId,
-                    error: e.message,
-                    stack: e.stack
-                });
-                updateStatus('Error: ' + e.message, false);
-                
-                // Log all collected logs to console for debugging
-                console.group('Cast Session Logs');
-                ClientLogger.getLogs().forEach(log => {
-                    console.log(`${log.timestamp} [${log.level}] ${log.message}`, log.data || '');
-                });
-                console.groupEnd();
-            }
-        }
-
-        // Initialize logging on page load
-        window.addEventListener('load', function() {
-            ClientLogger.info('Page loaded and ready');
-            ClientLogger.debug('Browser capabilities', {
-                hasWebRTC: typeof RTCPeerConnection !== 'undefined',
-                hasGetDisplayMedia: navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function'
-            });
-        });
-
-        document.getElementById('start').addEventListener('click', start);
-    </script>
+  function connect() {
+    const es = new EventSource('/api/events');
+    es.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.reset) logEl.textContent = '';
+      if (m.view) showView(m.view);
+      if (m.line !== undefined) addLine(m.line);
+      if (follow) logEl.scrollTop = logEl.scrollHeight;
+    };
+    es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+  }
+  connect();
+</script>
 </body>
 </html>

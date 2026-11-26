@@ -1,1 +1,6 @@
-monpitor.log
+monpitor.log*
+__pycache__/
+*.pyc
+monpitor.toml
+certs/
+.venv/
