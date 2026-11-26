@@ -12,7 +12,10 @@ sudo apt-get install -y python3-venv python3-dev git openssh-client mpv openssl
 echo "== Python environment"
 python3 -m venv "$DIR/.venv"
 "$DIR/.venv/bin/pip" install --upgrade pip
-"$DIR/.venv/bin/pip" install -r "$DIR/requirements.txt"
+"$DIR/.venv/bin/pip" install "aiohttp>=3.9"
+# Cast libraries can fail to build on 32-bit Pi OS; the log display works without them.
+"$DIR/.venv/bin/pip" install -r "$DIR/requirements.txt" \
+  || echo "WARNING: aiortc/av did not install, so screen casting is off. The log display still works."
 
 echo "== Config"
 [ -f "$DIR/monpitor.toml" ] || cp "$DIR/monpitor.example.toml" "$DIR/monpitor.toml"
