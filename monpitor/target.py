@@ -24,9 +24,11 @@ TARGET_FILE = os.path.join("monitor", "target")
 STATUS_FILES = {"blackbox": "STATUS.md", "tbot": "STATUS-tbot.md", "whitebox": "STATUS-whitebox.md"}
 REPORT_PREFIX = {"blackbox": "", "tbot": "tbot-", "whitebox": "whitebox-"}
 TS_RE = re.compile(r"(\d{8}-\d{6})$")
-# Guess: STATUS files say "Running" while a pass is going. Checked case-insensitively.
-RUNNING_RE = re.compile(r"\brunning\b", re.I)
-FINISHED_RE = re.compile(r"\b(finished|done|blocked|stopped|idle)\b", re.I)
+# run.sh writes "- **State:** Running" (or Deploying) while a pass is going, and
+# Finished / Stopped (blocked) / ... when it ends. "- **Now:** ..." says what it is doing.
+STATE_RE = re.compile(r"^\s*-\s*\*\*State:\*\*\s*(.+)$", re.M)
+NOW_RE = re.compile(r"^\s*-\s*\*\*Now:\*\*\s*(.+)$", re.M)
+ACTIVE_STATES = ("running", "deploying")
 
 
 @dataclass
@@ -97,12 +99,15 @@ def project_host(repo, project):
 
 
 def host_status(repo, host):
-    """Return (is_running, first status line) for one host's STATUS file."""
+    """Return (is_running, summary) from one host's STATUS file."""
     text = read_text(os.path.join(repo, STATUS_FILES.get(host, "")))
-    first = next((l.strip("# ").strip() for l in text.splitlines() if l.strip()), "")
-    head = "\n".join(text.splitlines()[:15])
-    running = bool(RUNNING_RE.search(head)) and not FINISHED_RE.search(first)
-    return running, first
+    m = STATE_RE.search(text)
+    if not m:
+        return False, ""
+    state = m.group(1).strip()
+    now = NOW_RE.search(text)
+    summary = f"{state}: {now.group(1).strip()}" if now else state
+    return state.lower().startswith(ACTIVE_STATES), summary
 
 
 def report_folders(repo, host=None):

@@ -13,14 +13,24 @@ def write(root, rel, text=""):
         f.write(text)
 
 
+def status(host, state, now=""):
+    """Same layout as status() in overnight-runs run.sh."""
+    lines = [f"# Overnight run status ({host})", "", f"- **State:** {state}",
+             "- **Updated:** 2026-11-26 14:05:46 PST", "- **Reports:** reports/x/"]
+    if now:
+        lines.append(f"- **Now:** {now}")
+    lines += ["", "## This pass", "", "- gigbuddy/02-x (sonnet/low): running"]
+    return "\n".join(lines) + "\n"
+
+
 class FakeRepo:
     def __init__(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = self.tmp.name
         write(self.root, "prompts/gigbuddy/project.conf", "host=tbot\ndir=~/gigbuddy\n")
         write(self.root, "prompts/bundledessentials/project.conf", "dir=~/workspace/BundledEssentials\n")
-        write(self.root, "STATUS.md", "# Finished\nUpdated: x\n")
-        write(self.root, "STATUS-tbot.md", "# Running\nRunning: gigbuddy/03-x\n")
+        write(self.root, "STATUS.md", status("blackbox", "Finished"))
+        write(self.root, "STATUS-tbot.md", status("tbot", "Running", "gigbuddy/03-x on sonnet/medium"))
         write(self.root, "reports/tbot-20261125-020000/gigbuddy__02-old.md", "old")
         write(self.root, "reports/tbot-20261126-020000/gigbuddy__03-new.md", "new")
         write(self.root, "reports/tbot-20261126-020000/BLOCKED", "why")
@@ -45,6 +55,7 @@ class TargetTests(unittest.TestCase):
     def test_project_live_when_host_running(self):
         v = resolve(self.root, "gigbuddy")
         self.assertEqual((v.kind, v.host), ("live", "tbot"))
+        self.assertEqual(v.note, "Running: gigbuddy/03-x on sonnet/medium")
 
     def test_project_falls_back_to_report_when_idle(self):
         v = resolve(self.root, "bundledessentials")
@@ -63,7 +74,7 @@ class TargetTests(unittest.TestCase):
 
     def test_auto_follows_running_host(self):
         self.assertEqual(resolve(self.root, "auto").host, "tbot")
-        write(self.root, "STATUS-tbot.md", "# Done\n")
+        write(self.root, "STATUS-tbot.md", status("tbot", "Stopped (blocked)", "running out of time"))
         v = resolve(self.root, "auto")
         self.assertEqual(v.kind, "report")
         self.assertEqual(os.path.basename(v.report_dir), "tbot-20261126-020000")
