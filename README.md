@@ -38,7 +38,18 @@ Lower `cast.max_width` in `monpitor.toml` if it stutters.
 
 ## Setup on the Pi
 
-Uses Raspberry Pi OS Lite (64-bit) with SSH and Wi-Fi set in Raspberry Pi Imager.
+Works on Raspberry Pi OS 64-bit, Lite or desktop (tested on Debian 13 trixie).
+
+On the **desktop** image, the HDMI screen shows the desktop, not tty1, and the
+desktop holds the display, so cast mode can't draw either. Boot to the text
+console instead, so MonPitor owns the screen:
+
+```bash
+sudo systemctl set-default multi-user.target && sudo reboot
+```
+
+(`sudo systemctl set-default graphical.target` brings the desktop back.)
+On Tailscale, use the MagicDNS names in `monpitor.toml`, e.g. `ssh = "eaton-lambert@blackbox"`.
 
 ```bash
 git clone https://github.com/eatonlambert-Slasonics/monpitor.git

@@ -58,8 +58,12 @@ class Monitor:
         self.casting = False
         self.web_clients = set()
         if cfg.cast_enabled:
-            from monpitor.cast import CastReceiver  # aiortc is only needed for cast mode
-            self.cast = CastReceiver(cfg, self.set_casting)
+            try:
+                from monpitor.cast import CastReceiver  # aiortc is only needed for cast mode
+                self.cast = CastReceiver(cfg, self.set_casting)
+            except ImportError as e:
+                # Keep the log display running on Pis where aiortc/av didn't install (e.g. 32-bit OS).
+                log.warning("Cast mode off: %s. Install aiortc and av to enable it.", e)
 
     def set_view(self, view):
         asyncio.create_task(self._apply(view))

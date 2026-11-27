@@ -11,6 +11,8 @@ User=@USER@
 SupplementaryGroups=tty video render
 WorkingDirectory=@DIR@
 ExecStart=@DIR@/.venv/bin/python @DIR@/server.py --config @DIR@/monpitor.toml
+# tty1 can be root-only (seen on the desktop image); "+" runs this as root.
+ExecStartPre=+/bin/chmod g+rw /dev/tty1
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
