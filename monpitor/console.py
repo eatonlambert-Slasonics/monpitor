@@ -10,6 +10,8 @@ import termios
 import time
 import unicodedata
 
+from monpitor.style import ansi, spans
+
 log = logging.getLogger("monpitor.console")
 
 CLEAR = "\x1b[H\x1b[2J"
@@ -87,7 +89,7 @@ class ConsoleRenderer:
             lines.append(DIM + fit(" " + info, cols) + RESET)
         room = rows - len(lines)
         body = list(self.buffer.lines)[-room:] if room > 0 else []
-        lines += [fit(l, cols) for l in body]
+        lines += [ansi(spans(l), cols) for l in body]
         os.write(self.fd, (CLEAR + HIDE_CURSOR + "\n".join(lines)).encode("utf-8", errors="replace"))
 
     async def run(self):

@@ -13,6 +13,8 @@ WorkingDirectory=@DIR@
 ExecStart=@DIR@/.venv/bin/python @DIR@/server.py --config @DIR@/monpitor.toml
 # tty1 can be root-only (seen on the desktop image); "+" runs this as root.
 ExecStartPre=+/bin/chmod g+rw /dev/tty1
+# Bigger console font, from [display] font in monpitor.toml.
+ExecStartPre=+/bin/sh @DIR@/deploy/console-font.sh @DIR@/monpitor.toml
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes

@@ -21,6 +21,7 @@ from aiohttp import web
 from monpitor import config as config_mod
 from monpitor.console import ConsoleRenderer
 from monpitor.logsource import LineBuffer, LiveTail, load_report
+from monpitor.style import spans
 from monpitor.target import TargetWatcher
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -138,6 +139,13 @@ async def api_state(request):
     return web.json_response({**mon.snapshot(), "lines": list(mon.buffer.lines)[-500:]})
 
 
+def styled(msg):
+    """Add colour spans to a line message for the web page."""
+    if "line" in msg:
+        return {**msg, "spans": spans(msg["line"])}
+    return msg
+
+
 async def api_events(request):
     """Server-sent events: view changes and new log lines."""
     mon = request.app["monitor"]
@@ -149,7 +157,7 @@ async def api_events(request):
     try:
         await resp.write(f"data: {json.dumps({'view': mon.snapshot(), 'reset': True})}\n\n".encode())
         for line in list(mon.buffer.lines)[-500:]:
-            await resp.write(f"data: {json.dumps({'line': line})}\n\n".encode())
+            await resp.write(f"data: {json.dumps(styled({'line': line}))}\n\n".encode())
         while True:
             getters = [asyncio.create_task(lines.get()), asyncio.create_task(views.get())]
             done, pending = await asyncio.wait(getters, timeout=20, return_when=asyncio.FIRST_COMPLETED)
@@ -158,7 +166,7 @@ async def api_events(request):
             if not done:
                 await resp.write(b": keepalive\n\n")
             for d in done:
-                await resp.write(f"data: {json.dumps(d.result())}\n\n".encode())
+                await resp.write(f"data: {json.dumps(styled(d.result()))}\n\n".encode())
     except (ConnectionResetError, asyncio.CancelledError):
         pass
     finally:

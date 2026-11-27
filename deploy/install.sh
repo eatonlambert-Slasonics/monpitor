@@ -7,7 +7,7 @@ USER_NAME="$(id -un)"
 
 echo "== Packages"
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-dev git openssh-client mpv openssl
+sudo apt-get install -y python3-venv python3-dev git openssh-client mpv openssl kbd console-setup
 
 echo "== Python environment"
 python3 -m venv "$DIR/.venv"

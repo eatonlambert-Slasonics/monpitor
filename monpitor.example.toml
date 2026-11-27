@@ -25,6 +25,10 @@ log = "~/overnight-runs/run.log"
 [display]
 console = true        # draw on the HDMI text console
 tty = "/dev/tty1"
+# HDMI console font. On a 1080p screen: Uni2-TerminusBold32x16 shows about
+# 120 columns x 33 lines, Uni2-TerminusBold24x12 about 160 x 45.
+# "default" leaves the font alone. Takes effect on: sudo systemctl restart monpitor
+font = "Uni2-TerminusBold32x16"
 buffer_lines = 2000
 
 [cast]
