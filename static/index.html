@@ -7,7 +7,7 @@
 <style>
   :root { --bg:#111; --fg:#ddd; --dim:#888; --bar:#1f3a5f; --ok:#2ecc71; --warn:#e67e22; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 ui-monospace, Menlo, Consolas, monospace;
+  body { margin:0; background:var(--bg); color:var(--fg); font:var(--size, 20px)/1.4 ui-monospace, Menlo, Consolas, monospace;
          height:100vh; display:flex; flex-direction:column; }
   header { background:var(--bar); padding:8px 12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   header h1 { font-size:15px; margin:0; flex:1; min-width:200px; }
@@ -15,6 +15,20 @@
   .pill { font-size:12px; padding:2px 8px; border-radius:10px; background:rgba(255,255,255,.15); }
   .live { background:var(--ok); color:#000; }
   #note { color:var(--dim); padding:4px 12px; min-height:1.4em; }
+  .size { display:flex; gap:4px; }
+  .size button { background:rgba(255,255,255,.15); color:#fff; border:0; border-radius:4px; padding:2px 8px; font:inherit; font-size:14px; cursor:pointer; }
+  /* Same palette as the HDMI console (monpitor/style.py). */
+  .k-time, .k-sep, .k-dim { color:var(--dim); }
+  .k-name { color:#4fc3d9; }
+  .k-tool { color:#e5c07b; }
+  .k-says { color:#fff; font-weight:600; }
+  .k-error { color:#ff6b6b; font-weight:600; }
+  .k-warn { color:#e5c07b; }
+  .k-ok { color:#5fd77f; font-weight:600; }
+  .k-runner { color:#c678dd; }
+  .k-start { color:#c678dd; font-weight:600; }
+  .k-heading { color:#4fc3d9; font-weight:600; }
+  .k-rule { color:#c678dd; }
   #log { flex:1; overflow:auto; margin:0; padding:8px 12px; white-space:pre-wrap; word-break:break-word; }
 </style>
 </head>
@@ -22,10 +36,11 @@
 <header>
   <h1 id="title">MonPitor</h1>
   <span id="kind" class="pill">…</span>
+  <span class="size"><button id="smaller" title="Smaller text">A−</button><button id="bigger" title="Bigger text">A+</button></span>
   <a id="castlink" href="/cast">Cast a screen</a>
 </header>
 <div id="note"></div>
-<pre id="log"></pre>
+<div id="log"></div>
 <script>
   // Screen capture needs HTTPS, which MonPitor serves on port 8443.
   if (location.protocol === 'http:') document.getElementById('castlink').href = 'https://' + location.hostname + ':8443/cast';
@@ -36,8 +51,29 @@
     follow = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
   });
 
-  function addLine(text) {
-    logEl.appendChild(document.createTextNode(text + '\n'));
+  // Text size, remembered per browser.
+  let size = 20;
+  try { size = parseInt(localStorage.getItem('monpitor-size'), 10) || 20; } catch (e) {}
+  function setSize(px) {
+    size = Math.max(12, Math.min(48, px));
+    document.body.style.setProperty('--size', size + 'px');
+    try { localStorage.setItem('monpitor-size', size); } catch (e) {}
+  }
+  setSize(size);
+  document.getElementById('smaller').onclick = () => setSize(size - 2);
+  document.getElementById('bigger').onclick = () => setSize(size + 2);
+
+  function addLine(text, spans) {
+    const row = document.createElement('div');
+    for (const [part, kind] of (spans || [[text, '']])) {
+      if (!kind) { row.appendChild(document.createTextNode(part)); continue; }
+      const el = document.createElement('span');
+      el.className = 'k-' + kind;
+      el.textContent = part;
+      row.appendChild(el);
+    }
+    if (!row.childNodes.length) row.appendChild(document.createTextNode('\u00a0'));
+    logEl.appendChild(row);
     while (logEl.childNodes.length > MAX) logEl.removeChild(logEl.firstChild);
   }
 
@@ -56,7 +92,7 @@
       const m = JSON.parse(e.data);
       if (m.reset) logEl.textContent = '';
       if (m.view) showView(m.view);
-      if (m.line !== undefined) addLine(m.line);
+      if (m.line !== undefined) addLine(m.line, m.spans);
       if (follow) logEl.scrollTop = logEl.scrollHeight;
     };
     es.onerror = () => { es.close(); setTimeout(connect, 3000); };

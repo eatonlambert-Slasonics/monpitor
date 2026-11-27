@@ -24,6 +24,10 @@ The Pi keeps its own clone of overnight-runs and checks it with `git ls-remote` 
   Claude Code's `--output-format stream-json` are shown as readable text and tool calls.
 - **Finished** runs are read from `reports/` in the clone, so the machine that ran them can be off.
 
+Lines are colour-coded by type (Claude's notes, tool calls, errors, finished runs). The
+HDMI console uses a large Terminus font, set by `font` under `[display]` in
+`monpitor.toml`. The web view has A−/A+ buttons for text size.
+
 The same view is at `http://monpitor.local:8080/` in any browser.
 
 ## Screen casting

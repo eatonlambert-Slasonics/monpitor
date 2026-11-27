@@ -109,3 +109,27 @@ class CastTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StyleTests(unittest.TestCase):
+    def kinds(self, line):
+        from monpitor.style import spans
+        return [k for _, k in spans(line) if k]
+
+    def test_progress_lines(self):
+        self.assertEqual(self.kinds("[14:05:25]   dont-forget/24-x | Bash: git push"),
+                         ["time", "name", "sep", "tool", "sep"])
+        self.assertIn("says", self.kinds("[14:05:39]   p/r | says: done it"))
+        self.assertIn("error", self.kinds("[14:05:30]   p/r | tool error: Exit code 128"))
+        self.assertIn("ok", self.kinds("[14:05:39]   p/r | done: success, 5 turns, ~$0.28"))
+
+    def test_runner_lines(self):
+        self.assertEqual(self.kinds("[Thu Nov 26 02:05:40 PM PST 2026] p/r finished, exit 0"), ["time", "ok"])
+        self.assertEqual(self.kinds("[Thu Nov 26 02:05:40 PM PST 2026] p/r finished, exit 1"), ["time", "error"])
+        self.assertEqual(self.kinds("[Thu Nov 26 02:05:40 PM PST 2026] starting p/r (model x)"), ["time", "start"])
+
+    def test_ansi_cuts_to_width(self):
+        from monpitor.style import ansi, spans
+        out = ansi(spans("[14:05:25]   proj/run | Bash: " + "x" * 200), 40)
+        plain = __import__("re").sub(r"\x1b\[[0-9;]*m", "", out)
+        self.assertEqual(len(plain), 40)
