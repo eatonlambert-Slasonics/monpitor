@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13" # Raspberry Pi OS trixie ships 3.13
+      - name: Compile
+        run: python -m compileall -q server.py monpitor tests
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t .
+      - name: Shell scripts parse
+        run: bash -n deploy/*.sh
