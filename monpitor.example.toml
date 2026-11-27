@@ -10,11 +10,11 @@ poll_seconds = 5
 
 # How the Pi reaches each machine for live logs (ssh key from the Pi, no password).
 [hosts.blackbox]
-ssh = "eaton-lambert@blackbox.local"
+ssh = "eaton-lambert@blackbox"   # Tailscale name; or an IP
 log = "~/overnight-runs/run.log"
 
 [hosts.tbot]
-ssh = ""          # e.g. "pi@tbot.local"
+ssh = ""          # e.g. "tbot@tbot"
 log = "~/overnight-runs/run.log"
 
 [hosts.whitebox]
