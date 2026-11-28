@@ -30,26 +30,76 @@
   .k-heading { color:#4fc3d9; font-weight:600; }
   .k-rule { color:#c678dd; }
   #log { flex:1; overflow:auto; margin:0; padding:8px 12px; white-space:pre-wrap; word-break:break-word; }
+  /* Lines with a time column wrap under the text, not under the time. */
+  #log .t { padding-left:10ch; text-indent:-10ch; }
+  #fresh { font-size:13px; padding:2px 8px; border-radius:10px; background:rgba(255,255,255,.15); color:#fff; }
+  #fresh.quiet { background:var(--warn); color:#000; font-weight:600; }
+  #fresh:empty { display:none; }
+  main { flex:1; display:flex; flex-direction:column; position:relative; min-height:0; }
+  #latest { position:absolute; right:20px; bottom:16px; display:none; background:var(--bar); color:#fff;
+            border:1px solid rgba(255,255,255,.3); border-radius:16px; padding:6px 14px; font:inherit; font-size:14px; cursor:pointer; }
+  #latest.show { display:block; }
 </style>
 </head>
 <body>
 <header>
   <h1 id="title">MonPitor</h1>
   <span id="kind" class="pill">…</span>
+  <span id="fresh" title="When the log last got a new line"></span>
   <span class="size"><button id="smaller" title="Smaller text">A−</button><button id="bigger" title="Bigger text">A+</button></span>
   <a id="castlink" href="/cast">Cast a screen</a>
 </header>
 <div id="note"></div>
-<div id="log"></div>
+<main><div id="log"></div><button id="latest">▼ Jump to latest</button></main>
 <script>
   // Screen capture needs HTTPS, which MonPitor serves on port 8443.
   if (location.protocol === 'http:') document.getElementById('castlink').href = 'https://' + location.hostname + ':8443/cast';
   const logEl = document.getElementById('log');
+  const latestBtn = document.getElementById('latest');
   const MAX = 3000;
-  let follow = true;
+  const QUIET = 10 * 60;   // same as QUIET_SECONDS in monpitor/style.py
+  const RESUME_MS = 60000; // scrolled up and left alone this long: follow again
+
+  // Stay on the newest line unless you scroll up to read. Then a button takes
+  // you back, and after a minute without scrolling it follows again by itself.
+  let follow = true, lastUserScroll = 0, autoScrolling = false;
+  function atBottom() { return logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40; }
+  function toLatest() {
+    follow = true;
+    autoScrolling = true;
+    logEl.scrollTop = logEl.scrollHeight;
+    latestBtn.classList.remove('show');
+  }
   logEl.addEventListener('scroll', () => {
-    follow = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
+    if (autoScrolling) { autoScrolling = false; return; }
+    lastUserScroll = Date.now();
+    follow = atBottom();
+    latestBtn.classList.toggle('show', !follow);
   });
+  latestBtn.onclick = toLatest;
+  window.addEventListener('resize', () => { if (follow) toLatest(); });
+  setInterval(() => {
+    if (!follow && Date.now() - lastUserScroll > RESUME_MS) toLatest();
+  }, 5000);
+
+  // "last line 11:27:05 · 3m ago", from the Pi's clock so a wrong clock here doesn't matter.
+  let activity = null, activityAt = '', isLive = false, skew = 0;
+  const freshEl = document.getElementById('fresh');
+  function ago(s) {
+    s = Math.max(0, Math.floor(s));
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
+    return Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h';
+  }
+  function showFresh() {
+    if (!isLive) { freshEl.textContent = ''; return; }
+    if (activity == null) { freshEl.textContent = 'no log lines yet'; freshEl.className = ''; return; }
+    const age = (Date.now() / 1000 + skew) - activity;
+    freshEl.textContent = 'last line ' + activityAt + ' · ' + ago(age) + ' ago';
+    freshEl.className = age >= QUIET ? 'quiet' : '';
+  }
+  setInterval(showFresh, 1000);
 
   // Text size, remembered per browser.
   let size = 20;
@@ -58,10 +108,12 @@
     size = Math.max(12, Math.min(48, px));
     document.body.style.setProperty('--size', size + 'px');
     try { localStorage.setItem('monpitor-size', size); } catch (e) {}
+    if (follow) toLatest(); // bigger text makes the log taller; stay at the bottom
   }
   setSize(size);
   document.getElementById('smaller').onclick = () => setSize(size - 2);
   document.getElementById('bigger').onclick = () => setSize(size + 2);
+
 
   function addLine(text, spans) {
     const row = document.createElement('div');
@@ -72,6 +124,7 @@
       el.textContent = part;
       row.appendChild(el);
     }
+    if (spans && spans.length && spans[0][1] === 'time') row.className = 't';
     if (!row.childNodes.length) row.appendChild(document.createTextNode('\u00a0'));
     logEl.appendChild(row);
     while (logEl.childNodes.length > MAX) logEl.removeChild(logEl.firstChild);
@@ -82,6 +135,11 @@
     const kind = document.getElementById('kind');
     kind.textContent = v.casting ? 'casting' : v.kind;
     kind.className = 'pill' + (v.kind === 'live' ? ' live' : '');
+    isLive = v.kind === 'live';
+    activity = v.activity;
+    activityAt = v.activity_at || '';
+    skew = v.server_time - Date.now() / 1000;
+    showFresh();
     document.getElementById('note').textContent =
       [v.note, v.state, v.repo_error && ('repo: ' + v.repo_error)].filter(Boolean).join('  ·  ');
   }
@@ -90,10 +148,11 @@
     const es = new EventSource('/api/events');
     es.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.reset) logEl.textContent = '';
+      if (m.reset) { logEl.textContent = ''; activity = null; }
       if (m.view) showView(m.view);
+      if (m.activity) { activity = m.activity; activityAt = m.activity_at || ''; showFresh(); }
       if (m.line !== undefined) addLine(m.line, m.spans);
-      if (follow) logEl.scrollTop = logEl.scrollHeight;
+      if (follow) toLatest();
     };
     es.onerror = () => { es.close(); setTimeout(connect, 3000); };
   }

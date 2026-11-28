@@ -117,3 +117,36 @@ def ansi(pieces, width):
         if used >= width:
             break
     return "".join(out)
+
+
+def stamped(line):
+    """Spans for a buffer ``Line`` with its time column in front.
+
+    Every log line gets ``HH:MM:SS`` (``~HH:MM:SS`` when the time is a guess,
+    ``--:--:--`` when unknown). progress.py lines already start with
+    ``[HH:MM:SS]``, so that copy is dropped instead of showing the time twice.
+    Report text and MonPitor's separators have no time column.
+    """
+    pieces = spans(line.text)
+    if line.clock is None and not line.approx:
+        return pieces
+    if PROGRESS_RE.match(line.text):
+        pieces = pieces[1:]
+    mark = "~" if line.approx else " "
+    return [(f"{mark}{line.clock or '--:--:--'} ", "time")] + pieces
+
+
+def age_text(seconds):
+    """How long ago, short: "8s", "4m", "2h 05m", "3d 4h"."""
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        return f"{s // 3600}h {s % 3600 // 60:02d}m"
+    return f"{s // 86400}d {s % 86400 // 3600}h"
+
+
+# A live log that has said nothing for this long is shown in warning colour.
+QUIET_SECONDS = 10 * 60

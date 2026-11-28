@@ -10,15 +10,18 @@ import termios
 import time
 import unicodedata
 
-from monpitor.style import ansi, spans
+from monpitor.style import QUIET_SECONDS, age_text, ansi, stamped
 
 log = logging.getLogger("monpitor.console")
 
-CLEAR = "\x1b[H\x1b[2J"
+HOME = "\x1b[H"
+CLEAR_EOL = "\x1b[K"
+CLEAR_BELOW = "\x1b[J"
 HIDE_CURSOR = "\x1b[?25l"
 INVERSE = "\x1b[7m"
 DIM = "\x1b[2m"
 RESET = "\x1b[0m"
+YELLOW = "\x1b[1;33m"
 
 
 def fit(text, width):
@@ -42,7 +45,9 @@ class ConsoleRenderer:
         self.header = ""
         self.note = ""
         self.state = ""
+        self.live = False
         self.paused = False
+        self.full_clear = True
         self.dirty = asyncio.Event()
         self.fd = None
 
@@ -62,8 +67,8 @@ class ConsoleRenderer:
             pass
         return tuple(shutil.get_terminal_size((100, 30)))
 
-    def set_view(self, header, note=""):
-        self.header, self.note = header, note
+    def set_view(self, header, note="", live=False):
+        self.header, self.note, self.live = header, note, live
         self.touch()
 
     def set_state(self, state):
@@ -76,21 +81,46 @@ class ConsoleRenderer:
     def pause(self, paused):
         """Stop drawing while a screen cast owns the display."""
         self.paused = paused
+        self.full_clear = True  # wipe whatever the cast left on screen
         self.touch()
+
+    def freshness(self, now=None):
+        """("last line 11:27:05, 3m ago", quiet) for a live log, else ("", False)."""
+        when = self.buffer.activity
+        if not self.live:
+            return "", False
+        if when is None:
+            return "no log lines yet", False
+        now = time.time() if now is None else now
+        age = now - when
+        text = f"last line {time.strftime('%H:%M:%S', time.localtime(when))}, {age_text(age)} ago"
+        return text, age >= QUIET_SECONDS
 
     def draw(self):
         cols, rows = self.size()
+        # One column spare: erasing to end of line on a full-width line would eat its last letter.
+        cols = max(10, cols - 1)
         top = f" MonPitor  {self.header}"
-        clock = time.strftime("%H:%M ")
+        clock = time.strftime("now %H:%M:%S ")
         top = fit(top, cols - len(clock)).ljust(cols - len(clock)) + clock
         lines = [INVERSE + top + RESET]
-        info = " ".join(x for x in (self.note, self.state) if x)
-        if info:
+        fresh, quiet = self.freshness()
+        info = " · ".join(x for x in (self.note, self.state) if x)
+        if fresh:
+            fresh_txt = fit(" " + fresh, cols)
+            rest = fit("  " + info, cols - len(fresh_txt)) if info else ""
+            lines.append((YELLOW if quiet else "") + fresh_txt + RESET + DIM + rest + RESET)
+        elif info:
             lines.append(DIM + fit(" " + info, cols) + RESET)
         room = rows - len(lines)
+        # Always the newest lines: the bottom of the buffer fills the bottom of the screen.
         body = list(self.buffer.lines)[-room:] if room > 0 else []
-        lines += [ansi(spans(l), cols) for l in body]
-        os.write(self.fd, (CLEAR + HIDE_CURSOR + "\n".join(lines)).encode("utf-8", errors="replace"))
+        lines += [ansi(stamped(l), cols) for l in body]
+        # Overwrite in place instead of clearing first, so the screen doesn't flicker.
+        start = HOME + ("\x1b[2J" if self.full_clear else "")
+        self.full_clear = False
+        out = start + HIDE_CURSOR + (CLEAR_EOL + "\n").join(lines) + CLEAR_EOL + CLEAR_BELOW
+        os.write(self.fd, out.encode("utf-8", errors="replace"))
 
     async def run(self):
         self.open()
@@ -102,8 +132,8 @@ class ConsoleRenderer:
                 self.dirty.set()
 
         async def tick():
-            while True:  # keeps the clock current and recovers after a cast
-                await asyncio.sleep(30)
+            while True:  # keeps the clock and "Xm ago" current, and recovers after a cast
+                await asyncio.sleep(1)
                 self.dirty.set()
 
         asyncio.create_task(pump())

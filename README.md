@@ -24,6 +24,24 @@ The Pi keeps its own clone of overnight-runs and checks it with `git ls-remote` 
   Claude Code's `--output-format stream-json` are shown as readable text and tool calls.
 - **Finished** runs are read from `reports/` in the clone, so the machine that ran them can be off.
 
+**How fresh is it?** Live lines arrive the moment they are written (ssh `tail -F`, no
+polling), and the newest line is always at the bottom of the HDMI screen. Every line has
+a time column:
+
+- ` 11:31:41` when the line was written: its own time for progress.py lines, else when it reached the Pi.
+- `~01:02:10` an estimate, for lines written before MonPitor connected (or while ssh was
+  down) that carry no time of their own: it is the last time seen above them.
+- A `──── live from 11:31:38` line marks where replayed history ends and live lines begin.
+
+Under the title, `last line 11:31:41, 3m ago` says when the log last got a line. It turns
+yellow after 10 minutes of silence. If ssh drops, MonPitor resumes where it stopped, so
+lines are neither repeated nor lost. The Pi's time zone should match the build
+machine's, since progress.py times are the build machine's local time
+(`sudo timedatectl set-timezone America/Los_Angeles`).
+
+In the web view, scrolling up to read pauses following; **Jump to latest** (or a minute
+without scrolling) goes back to the newest line.
+
 Lines are colour-coded by type (Claude's notes, tool calls, errors, finished runs). The
 HDMI console uses a large Terminus font, set by `font` under `[display]` in
 `monpitor.toml`. The web view has A−/A+ buttons for text size.
