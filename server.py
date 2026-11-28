@@ -15,13 +15,14 @@ import logging
 import logging.handlers
 import os
 import ssl
+import time
 
 from aiohttp import web
 
 from monpitor import config as config_mod
 from monpitor.console import ConsoleRenderer
 from monpitor.logsource import LineBuffer, LiveTail, load_report
-from monpitor.style import spans
+from monpitor.style import stamped
 from monpitor.target import TargetWatcher
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -87,7 +88,7 @@ class Monitor:
             else:
                 self.set_state("")
         if self.console:
-            self.console.set_view(view.title, view.note)
+            self.console.set_view(view.title, view.note, live=view.kind == "live")
         self.broadcast()
 
     def set_state(self, state):
@@ -113,6 +114,11 @@ class Monitor:
             "state": self.state,
             "casting": self.casting,
             "repo_error": self.watcher.error,
+            # When the log last got a line (Pi clock) and the Pi's time now, so the
+            # page can show "3m ago" even if the viewer's clock is off.
+            "activity": self.buffer.activity,
+            "activity_at": clock(self.buffer.activity),
+            "server_time": time.time(),
         }
 
     def broadcast(self):
@@ -136,13 +142,22 @@ async def page(name):
 
 async def api_state(request):
     mon = request.app["monitor"]
-    return web.json_response({**mon.snapshot(), "lines": list(mon.buffer.lines)[-500:]})
+    return web.json_response({**mon.snapshot(),
+                              "lines": [styled({"line": l})["spans"] for l in list(mon.buffer.lines)[-500:]]})
+
+
+def clock(epoch):
+    """HH:MM:SS in the Pi's time zone, the same zone as the time column."""
+    return time.strftime("%H:%M:%S", time.localtime(epoch)) if epoch else None
 
 
 def styled(msg):
-    """Add colour spans to a line message for the web page."""
+    """Turn a buffer message into JSON for the web page: line text plus colour spans."""
+    if msg.get("activity"):
+        msg = {**msg, "activity_at": clock(msg["activity"])}
     if "line" in msg:
-        return {**msg, "spans": spans(msg["line"])}
+        line = msg["line"]
+        return {**msg, "line": line.text, "spans": stamped(line)}
     return msg
 
 
